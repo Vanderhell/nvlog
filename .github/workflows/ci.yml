@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+
+  gcc-linux:
+    name: GCC / Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test (CMake)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build -V --timeout 30
+
+  clang-linux:
+    name: Clang / Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test (Clang)
+        run: |
+          CC=clang cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build -V --timeout 30
+
+  gcc-macos:
+    name: GCC / macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build -V --timeout 30
+
+  msvc-windows:
+    name: MSVC / Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        run: |
+          cmake -B build
+          cmake --build build --config Release
+          ctest --test-dir build -C Release -V --timeout 30
+
+  c89-compat:
+    name: C89 strict check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check C89 compatibility (headers only)
+        run: |
+          gcc -std=c89 -Wpedantic -fsyntax-only include/nvlog.h include/nvlog_hal_flash.h

@@ -1,0 +1,35 @@
+# Build
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Compiled binaries
+test_nvlog
+test_powerloss
+test_flash
+test_ring
+t1
+t2
+t3
+t4
+*.o
+*.a
+*.so
+*.exe
+
+# Archives
+*.tar.gz
+*.zip
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.claude/settings.local.json
