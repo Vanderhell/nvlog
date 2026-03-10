@@ -1,5 +1,13 @@
 # nvlog
 
+![CI](https://github.com/Vanderhell/nvlog/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![C99](https://img.shields.io/badge/C-99-blue.svg)
+![No heap](https://img.shields.io/badge/heap-none-brightgreen.svg)
+![No deps](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-186-blue.svg)
+![Footprint](https://img.shields.io/badge/flash-~1.2KB-orange.svg)
+
 **Tiny persistent record buffer for MCUs.**  
 Power-loss safe binary log for non-volatile memory — no filesystem, no heap, no dependencies.
 
