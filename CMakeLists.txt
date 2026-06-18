@@ -39,6 +39,7 @@ foreach(t test_nvlog test_powerloss test_ring)
 endforeach()
 
 target_include_directories(test_wire PRIVATE include)
+target_link_libraries(test_wire nvlog)
 
 target_include_directories(test_flash PRIVATE include backends)
 target_link_libraries(test_flash nvlog nvlog_flash_sim)

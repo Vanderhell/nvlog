@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../include/nvlog.h"
 #include "../include/nvlog_wire.h"
 
 static int g_pass = 0;
@@ -43,11 +44,29 @@ static void test_checked_arithmetic(void)
     CHECK(nvlog_u32_sub_checked(10u, 20u, &out) == 0);
 }
 
+static void test_api_misuse(void)
+{
+    nvlog_iter_t it;
+    nvlog_record_t rec;
+    nvlog_ctx_t ctx;
+    uint8_t buf[16];
+    nvlog_hal_t hal = {0};
+
+    memset(&it, 0, sizeof(it));
+    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_ERR_NOT_MOUNTED);
+
+    memset(&ctx, 0, sizeof(ctx));
+    CHECK(nvlog_read_payload(&ctx, &rec, buf, sizeof(buf)) == NVLOG_ERR_NOT_MOUNTED);
+
+    (void)hal;
+}
+
 int main(void)
 {
     printf("nvlog wire helper test\n");
     test_le_encoding();
     test_checked_arithmetic();
+    test_api_misuse();
     printf("PASSED: %d\n", g_pass);
     printf("FAILED: %d\n", g_fail);
     return g_fail == 0 ? 0 : 1;
