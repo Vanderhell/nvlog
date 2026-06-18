@@ -212,6 +212,19 @@ static int hal_write(nvlog_ctx_t *ctx, uint32_t addr, const void *buf, uint32_t 
     return ctx->hal.write(addr, buf, len, ctx->hal.user);
 }
 
+static nvlog_status_t erase_region(nvlog_ctx_t *ctx)
+{
+    uint8_t fill[64];
+    memset(fill, 0xFF, sizeof(fill));
+    for (uint32_t off = 0; off < ctx->region_size; ) {
+        uint32_t n = ctx->region_size - off;
+        if (n > (uint32_t)sizeof(fill)) n = (uint32_t)sizeof(fill);
+        if (hal_write(ctx, off, fill, n) != 0) return NVLOG_ERR_IO;
+        off += n;
+    }
+    return NVLOG_OK;
+}
+
 /* --- verify_record -------------------------------------------- */
 
 static int verify_record(nvlog_ctx_t *ctx, uint32_t cursor,
@@ -329,6 +342,7 @@ nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
     ctx->metadata_seq = metadata_seq;
     ctx->mutation    = 1;
 
+    if (erase_region(ctx) != NVLOG_OK) return NVLOG_ERR_IO;
     nvlog_superblock_t sb = {
         .magic = NVLOG_MEDIA_MAGIC,
         .format_version = NVLOG_MEDIA_VERSION,
@@ -665,9 +679,28 @@ nvlog_status_t nvlog_stats(nvlog_ctx_t *ctx, nvlog_stats_t *out)
     if (!ctx || !out)  return NVLOG_ERR_PARAM;
     if (!ctx->mounted) return NVLOG_ERR_NOT_MOUNTED;
 
-    if (ctx->mode == NVLOG_MODE_RING && ctx->ring_full) {
-        out->used_bytes = ctx->region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE;
-        out->free_bytes = 0;
+    if (ctx->mode == NVLOG_MODE_RING) {
+        uint32_t used = 0;
+        uint32_t cursor = ctx->tail_ptr;
+        uint32_t guard = 0;
+        while (cursor != ctx->write_ptr &&
+               cursor + NVLOG_RECORD_OVERHEAD <= ctx->region_size &&
+               guard++ < ctx->record_count + 1u) {
+            nvlog_rec_hdr_t hdr;
+            uint32_t total;
+            if (verify_record(ctx, cursor, &hdr, &total) != 0 || total == 0)
+                break;
+            used += total;
+            cursor += total;
+            if (cursor >= ctx->region_size)
+                cursor = (uint32_t)NVLOG_REGION_HEADER_SIZE;
+        }
+        if (used == 0 && ctx->record_count > 0 && ctx->tail_ptr == ctx->write_ptr)
+            used = ctx->region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE;
+        out->used_bytes = used;
+        out->free_bytes = (used >= ctx->region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE)
+                        ? 0
+                        : (ctx->region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE - used);
     } else {
         out->used_bytes = ctx->write_ptr - (uint32_t)NVLOG_REGION_HEADER_SIZE;
         out->free_bytes = ctx->region_size - ctx->write_ptr;
@@ -713,6 +746,7 @@ nvlog_status_t nvlog_ring_format(nvlog_ctx_t *ctx,
     ctx->metadata_seq = metadata_seq;
     ctx->mutation++;
 
+    if (erase_region(ctx) != NVLOG_OK) return NVLOG_ERR_IO;
     nvlog_superblock_t sb = {
         .magic = NVLOG_MEDIA_MAGIC,
         .format_version = NVLOG_MEDIA_VERSION,
