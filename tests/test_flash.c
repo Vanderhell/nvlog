@@ -20,6 +20,7 @@
 
 #include "../include/nvlog.h"
 #include "../include/nvlog_hal_flash.h"
+#include "../include/nvlog_wire.h"
 #include "../backends/nvlog_flash_sim.h"
 
 static int g_pass = 0;
@@ -64,18 +65,24 @@ static void test_fl01(void)
     nvlog_ctx_t ctx;
     CHECK(nvlog_flash_format(&ctx, &flash, REGION_SIZE) == NVLOG_OK);
 
-    /* first 8 bytes = region header (magic + size) — NOT 0xFF */
-    uint8_t hdr[8];
-    flash.base.read(0, hdr, sizeof(hdr), flash.base.user);
+    /* first 64 bytes = redundant A/B superblock pair */
+    uint8_t sb0[NVLOG_SUPERBLOCK_SIZE];
+    uint8_t sb1[NVLOG_SUPERBLOCK_SIZE];
+    flash.base.read(0, sb0, sizeof(sb0), flash.base.user);
+    flash.base.read(NVLOG_SUPERBLOCK_SIZE, sb1, sizeof(sb1), flash.base.user);
 
-    /* magic is stored in native byte order (little-endian on x86) */
-    uint32_t magic;
-    memcpy(&magic, hdr, sizeof(magic));
-    CHECK(magic == NVLOG_REGION_MAGIC);
+    CHECK(nvlog_load_u32le(sb0 + 0) == NVLOG_MEDIA_MAGIC);
+    CHECK(nvlog_load_u16le(sb0 + 4) == NVLOG_MEDIA_VERSION);
+    CHECK(sb0[6] == NVLOG_MODE_LINEAR);
+    CHECK(nvlog_load_u32le(sb0 + 8) == REGION_SIZE);
+    CHECK(nvlog_load_u32le(sb1 + 0) == NVLOG_MEDIA_MAGIC);
+    CHECK(nvlog_load_u16le(sb1 + 4) == NVLOG_MEDIA_VERSION);
+    CHECK(sb1[6] == NVLOG_MODE_LINEAR);
+    CHECK(nvlog_load_u32le(sb1 + 8) == REGION_SIZE);
 
-    /* rest of region is 0xFF (no records yet) */
+    /* record area after the metadata header remains erased */
     uint8_t byte;
-    flash.base.read(8, &byte, 1, flash.base.user);
+    flash.base.read(NVLOG_REGION_HEADER_SIZE, &byte, 1, flash.base.user);
     CHECK(byte == 0xFF);
 
     nvlog_flash_sim_close(&sim);

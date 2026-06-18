@@ -44,19 +44,31 @@ extern "C" {
 /* --- version --------------------------------------------------- */
 
 #define NVLOG_VERSION_MAJOR 0
-#define NVLOG_VERSION_MINOR 4
+#define NVLOG_VERSION_MINOR 5
 #define NVLOG_VERSION_PATCH 0
 
 /* --- limits ---------------------------------------------------- */
 
+#define NVLOG_MEDIA_MAGIC         0x4E564C47UL  /* "NVLG" */
+#define NVLOG_MEDIA_VERSION       0x0005u
+#define NVLOG_REGION_MAGIC        NVLOG_MEDIA_MAGIC
 #define NVLOG_RECORD_MAGIC        0x4Eu
-#define NVLOG_REGION_MAGIC        0x4E564C47UL  /* "NVLG" */
-#define NVLOG_HEADER_SIZE         8u            /* MAGIC+FLAGS+LEN+SEQ */
-#define NVLOG_CRC_SIZE            4u
-#define NVLOG_RECORD_OVERHEAD     (NVLOG_HEADER_SIZE + NVLOG_CRC_SIZE)
+#define NVLOG_RECORD_VERSION      0x05u
+#define NVLOG_HEADER_SIZE         8u
+#define NVLOG_SUPERBLOCK_SIZE     32u
+#define NVLOG_SUPERBLOCK_COUNT    2u
+#define NVLOG_MEDIA_HEADER_SIZE   (NVLOG_SUPERBLOCK_SIZE * NVLOG_SUPERBLOCK_COUNT)
+#define NVLOG_RECORD_HEADER_SIZE  20u
+#define NVLOG_RECORD_CRC_SIZE     4u
+#define NVLOG_RECORD_OVERHEAD     (NVLOG_RECORD_HEADER_SIZE + NVLOG_RECORD_CRC_SIZE)
 #define NVLOG_MAX_PAYLOAD         65535u
+#define NVLOG_REGION_HEADER_SIZE  NVLOG_MEDIA_HEADER_SIZE
 
-/* FLAGS field values (byte 1 of record header) */
+typedef enum {
+    NVLOG_RECORD_TYPE_DATA      = 0x01u,
+    NVLOG_RECORD_TYPE_WRAP_PAD   = 0x02u,
+} nvlog_record_type_t;
+
 #define NVLOG_FLAGS_LINEAR        0x00u
 #define NVLOG_FLAGS_RING          0x01u
 
@@ -80,6 +92,7 @@ typedef enum {
     NVLOG_ERR_NOT_MOUNTED = -7,  /* nvlog_mount() not called */
     NVLOG_ERR_STALE       = -8,  /* iterator or descriptor snapshot invalid */
     NVLOG_ERR_BOUNDS      = -9,  /* checked arithmetic or range validation failed */
+    NVLOG_ERR_UNSUPPORTED = -10, /* unsupported mode/version/media combination */
 } nvlog_status_t;
 
 /* --- HAL — byte-writable backends only ------------------------ */
@@ -118,8 +131,6 @@ typedef struct __attribute__((packed)) {
 } nvlog_region_header_t;
 #endif
 
-#define NVLOG_REGION_HEADER_SIZE sizeof(nvlog_region_header_t)
-
 /* --- context --------------------------------------------------- */
 
 typedef struct {
@@ -128,6 +139,8 @@ typedef struct {
     uint32_t      write_ptr;     /* byte offset of next write */
     uint32_t      next_seq;      /* next sequence number to assign */
     uint32_t      mutation;      /* increments on mount/format/append */
+    uint32_t      generation;    /* active media generation */
+    uint32_t      metadata_seq;   /* superblock publication counter */
     uint8_t       mounted;       /* 1 after successful nvlog_mount() */
 
     /* ring mode fields */
@@ -156,6 +169,7 @@ typedef struct {
     uint32_t      stop_ptr;    /* where to stop (write_ptr in ring mode) */
     uint8_t       wrapped;     /* 1 after cursor has wrapped around */
     uint32_t      snapshot_mutation; /* ctx mutation observed at init */
+    uint32_t      snapshot_generation;
 } nvlog_iter_t;
 
 /* --- API ------------------------------------------------------- */

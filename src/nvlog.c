@@ -31,6 +31,101 @@ typedef struct __attribute__((packed)) {
 } nvlog_rec_hdr_t;
 #endif
 
+#define NVLOG_SUPERBLOCK_PAYLOAD_SIZE 24u
+
+typedef struct {
+    uint32_t magic;
+    uint16_t format_version;
+    uint8_t  mode;
+    uint8_t  reserved0;
+    uint32_t region_size;
+    uint32_t generation;
+    uint32_t metadata_seq;
+    uint32_t feature_flags;
+    uint32_t crc32;
+} nvlog_superblock_t;
+
+static int hal_read(nvlog_ctx_t *ctx, uint32_t addr, void *buf, uint32_t len);
+static int hal_write(nvlog_ctx_t *ctx, uint32_t addr, const void *buf, uint32_t len);
+
+static void sb_encode(uint8_t *dst, const nvlog_superblock_t *sb)
+{
+    nvlog_store_u32le(dst + 0, sb->magic);
+    nvlog_store_u16le(dst + 4, sb->format_version);
+    dst[6] = sb->mode;
+    dst[7] = sb->reserved0;
+    nvlog_store_u32le(dst + 8, sb->region_size);
+    nvlog_store_u32le(dst + 12, sb->generation);
+    nvlog_store_u32le(dst + 16, sb->metadata_seq);
+    nvlog_store_u32le(dst + 20, sb->feature_flags);
+    nvlog_store_u32le(dst + 24, sb->crc32);
+}
+
+static int sb_decode(nvlog_superblock_t *sb, const uint8_t *src)
+{
+    if (!sb || !src) return -1;
+    sb->magic = nvlog_load_u32le(src + 0);
+    sb->format_version = nvlog_load_u16le(src + 4);
+    sb->mode = src[6];
+    sb->reserved0 = src[7];
+    sb->region_size = nvlog_load_u32le(src + 8);
+    sb->generation = nvlog_load_u32le(src + 12);
+    sb->metadata_seq = nvlog_load_u32le(src + 16);
+    sb->feature_flags = nvlog_load_u32le(src + 20);
+    sb->crc32 = nvlog_load_u32le(src + 24);
+    return 0;
+}
+
+static uint32_t sb_crc(const uint8_t *src)
+{
+    return nvlog_crc32_bytes(src, NVLOG_SUPERBLOCK_PAYLOAD_SIZE);
+}
+
+static int sb_read(nvlog_ctx_t *ctx, uint32_t offset, nvlog_superblock_t *sb)
+{
+    uint8_t raw[NVLOG_SUPERBLOCK_SIZE];
+    if (hal_read(ctx, offset, raw, sizeof(raw)) != 0) return -1;
+    if (sb_decode(sb, raw) != 0) return -1;
+    if (sb->magic != NVLOG_MEDIA_MAGIC) return -1;
+    if (sb->format_version != NVLOG_MEDIA_VERSION) return -1;
+    if (sb->reserved0 != 0) return -1;
+    if (sb->feature_flags != 0) return -1;
+    if (sb->mode != NVLOG_MODE_LINEAR && sb->mode != NVLOG_MODE_RING) return -1;
+    if (sb->region_size != ctx->region_size) return -1;
+    if (sb->crc32 != sb_crc(raw)) return -1;
+    return 0;
+}
+
+static int sb_write(nvlog_ctx_t *ctx, uint32_t offset, const nvlog_superblock_t *sb)
+{
+    uint8_t raw[NVLOG_SUPERBLOCK_SIZE];
+    nvlog_superblock_t temp = *sb;
+    temp.crc32 = 0;
+    sb_encode(raw, &temp);
+    temp.crc32 = sb_crc(raw);
+    sb_encode(raw, &temp);
+    return hal_write(ctx, offset, raw, sizeof(raw));
+}
+
+static int generation_is_newer(uint32_t a, uint32_t b)
+{
+    return (int32_t)(a - b) > 0;
+}
+
+static int load_current_superblock(nvlog_ctx_t *ctx, nvlog_superblock_t *out)
+{
+    nvlog_superblock_t a, b;
+    int have_a = sb_read(ctx, 0, &a) == 0;
+    int have_b = sb_read(ctx, NVLOG_SUPERBLOCK_SIZE, &b) == 0;
+    if (have_a && have_b) {
+        *out = generation_is_newer(a.generation, b.generation) ? a : b;
+        return 0;
+    }
+    if (have_a) { *out = a; return 0; }
+    if (have_b) { *out = b; return 0; }
+    return -1;
+}
+
 /* --- CRC32 ----------------------------------------------------- */
 
 static uint32_t crc32_update(uint32_t crc, const uint8_t *data, uint32_t len)
@@ -131,12 +226,23 @@ nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
     ctx->tail_ptr    = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     ctx->mode        = NVLOG_MODE_LINEAR;
     ctx->record_count = 0;
+    ctx->generation  = 1;
+    ctx->metadata_seq = 0;
     ctx->mutation    = 1;
 
-    nvlog_region_header_t rh;
-    rh.magic       = NVLOG_REGION_MAGIC;
-    rh.region_size = region_size;
-    if (hal_write(ctx, 0, &rh, sizeof(rh)) != 0) return NVLOG_ERR_IO;
+    nvlog_superblock_t sb = {
+        .magic = NVLOG_MEDIA_MAGIC,
+        .format_version = NVLOG_MEDIA_VERSION,
+        .mode = NVLOG_MODE_LINEAR,
+        .reserved0 = 0,
+        .region_size = region_size,
+        .generation = ctx->generation,
+        .metadata_seq = ctx->metadata_seq,
+        .feature_flags = 0,
+        .crc32 = 0,
+    };
+    if (sb_write(ctx, 0, &sb) != 0) return NVLOG_ERR_IO;
+    if (sb_write(ctx, NVLOG_SUPERBLOCK_SIZE, &sb) != 0) return NVLOG_ERR_IO;
 
     ctx->mounted = 1;
     return NVLOG_OK;
@@ -159,9 +265,12 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     ctx->mode        = NVLOG_MODE_LINEAR;
     ctx->mutation    = 1;
 
-    nvlog_region_header_t rh;
-    if (hal_read(ctx, 0, &rh, sizeof(rh)) != 0) return NVLOG_ERR_IO;
-    if (rh.magic != NVLOG_REGION_MAGIC)          return NVLOG_ERR_CORRUPT;
+    nvlog_superblock_t sb;
+    if (load_current_superblock(ctx, &sb) != 0) return NVLOG_ERR_CORRUPT;
+    ctx->mode = (nvlog_mode_t)sb.mode;
+    ctx->generation = sb.generation;
+    ctx->metadata_seq = sb.metadata_seq;
+    ctx->mutation = 1;
 
     uint32_t cursor = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     while (cursor + NVLOG_RECORD_OVERHEAD <= region_size) {
@@ -468,6 +577,21 @@ nvlog_status_t nvlog_ring_format(nvlog_ctx_t *ctx,
     ctx->tail_ptr     = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     ctx->ring_full    = 0;
     ctx->record_count = 0;
+    ctx->metadata_seq++;
+
+    nvlog_superblock_t sb = {
+        .magic = NVLOG_MEDIA_MAGIC,
+        .format_version = NVLOG_MEDIA_VERSION,
+        .mode = NVLOG_MODE_RING,
+        .reserved0 = 0,
+        .region_size = region_size,
+        .generation = ctx->generation,
+        .metadata_seq = ctx->metadata_seq,
+        .feature_flags = 0,
+        .crc32 = 0,
+    };
+    if (sb_write(ctx, 0, &sb) != 0) return NVLOG_ERR_IO;
+    if (sb_write(ctx, NVLOG_SUPERBLOCK_SIZE, &sb) != 0) return NVLOG_ERR_IO;
     return NVLOG_OK;
 }
 
@@ -484,9 +608,11 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
     ctx->region_size = region_size;
     ctx->mode        = NVLOG_MODE_RING;
 
-    nvlog_region_header_t rh;
-    if (hal_read(ctx, 0, &rh, sizeof(rh)) != 0) return NVLOG_ERR_IO;
-    if (rh.magic != NVLOG_REGION_MAGIC)          return NVLOG_ERR_CORRUPT;
+    nvlog_superblock_t sb;
+    if (load_current_superblock(ctx, &sb) != 0) return NVLOG_ERR_CORRUPT;
+    if (sb.mode != NVLOG_MODE_RING) return NVLOG_ERR_CORRUPT;
+    ctx->generation = sb.generation;
+    ctx->metadata_seq = sb.metadata_seq;
 
     /* -- Pass 1: find record with highest SEQ ------------------- */
     uint32_t max_seq    = 0;

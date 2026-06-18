@@ -44,4 +44,22 @@ static inline int nvlog_u32_sub_checked(uint32_t a, uint32_t b, uint32_t *out)
     return 1;
 }
 
+static inline uint32_t nvlog_crc32_step(uint32_t crc, uint8_t byte)
+{
+    crc ^= byte;
+    for (int i = 0; i < 8; i++) {
+        uint32_t mask = 0u - (crc & 1u);
+        crc = (crc >> 1) ^ (0xEDB88320u & mask);
+    }
+    return crc;
+}
+
+static inline uint32_t nvlog_crc32_bytes(const uint8_t *data, uint32_t len)
+{
+    uint32_t crc = 0xFFFFFFFFu;
+    for (uint32_t i = 0; i < len; i++)
+        crc = nvlog_crc32_step(crc, data[i]);
+    return ~crc;
+}
+
 #endif /* NVLOG_WIRE_H */

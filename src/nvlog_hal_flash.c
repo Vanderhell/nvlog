@@ -14,6 +14,8 @@ nvlog_status_t nvlog_flash_format(nvlog_ctx_t             *ctx,
     if (!ctx || !flash)                        return NVLOG_ERR_PARAM;
     if (!flash->erase)                         return NVLOG_ERR_PARAM;
     if (!flash->base.read || !flash->base.write) return NVLOG_ERR_PARAM;
+    if (flash->user && flash->base.user && flash->user != flash->base.user)
+        return NVLOG_ERR_PARAM;
     if (flash->erase_size == 0)                return NVLOG_ERR_PARAM;
     if (region_size % flash->erase_size != 0)  return NVLOG_ERR_PARAM;
     if (region_size < flash->erase_size)       return NVLOG_ERR_PARAM;
@@ -37,8 +39,14 @@ nvlog_status_t nvlog_flash_verify_erased(const nvlog_hal_flash_t *flash,
         return NVLOG_ERR_PARAM;
 
     uint8_t  buf[32];
-    uint32_t remaining = region_size;
+    uint32_t remaining = 0;
     uint32_t offset    = 0;
+
+    if (region_size <= NVLOG_REGION_HEADER_SIZE)
+        return NVLOG_OK;
+
+    remaining = region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    offset    = (uint32_t)NVLOG_REGION_HEADER_SIZE;
 
     while (remaining > 0) {
         uint32_t n = remaining < sizeof(buf) ? remaining : sizeof(buf);

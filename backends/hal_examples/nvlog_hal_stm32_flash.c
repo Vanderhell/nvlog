@@ -143,7 +143,7 @@ void nvlog_stm32_flash_lock(void)
 static int stm32_flash_read(uint32_t addr, void *buf, uint32_t len, void *user)
 {
     nvlog_stm32_flash_ctx_t *ctx = (nvlog_stm32_flash_ctx_t *)user;
-    uint32_t abs_addr = ctx->base_addr + addr;
+    uintptr_t abs_addr = (uintptr_t)ctx->base_addr + (uintptr_t)addr;
     memcpy(buf, (const void *)abs_addr, len);
     return 0;
 }
@@ -161,7 +161,7 @@ static int stm32_flash_read(uint32_t addr, void *buf, uint32_t len, void *user)
 static int stm32_flash_write(uint32_t addr, const void *buf, uint32_t len, void *user)
 {
     nvlog_stm32_flash_ctx_t *ctx   = (nvlog_stm32_flash_ctx_t *)user;
-    uint32_t                 abs   = ctx->base_addr + addr;
+    uintptr_t                abs   = (uintptr_t)ctx->base_addr + (uintptr_t)addr;
     const uint8_t           *src   = (const uint8_t *)buf;
     uint32_t                 remaining = len;
 
@@ -196,7 +196,7 @@ static int stm32_flash_write(uint32_t addr, const void *buf, uint32_t len, void 
 static int stm32_flash_write(uint32_t addr, const void *buf, uint32_t len, void *user)
 {
     nvlog_stm32_flash_ctx_t *ctx = (nvlog_stm32_flash_ctx_t *)user;
-    uint32_t abs  = ctx->base_addr + addr;
+    uintptr_t abs  = (uintptr_t)ctx->base_addr + (uintptr_t)addr;
     const uint8_t *src = (const uint8_t *)buf;
     uint32_t remaining = len;
 
@@ -215,7 +215,7 @@ static int stm32_flash_write(uint32_t addr, const void *buf, uint32_t len, void 
             ((uint8_t *)&hi)[i - 4] = src[i];
 
         *(volatile uint32_t *)abs       = lo;
-        *(volatile uint32_t *)(abs + 4) = hi;
+        *(volatile uint32_t *)(abs + 4u) = hi;
 
         if (flash_wait_ready() != 0) { FLASH_CR &= ~FLASH_CR_PG; return -1; }
 
@@ -237,7 +237,7 @@ static int stm32_flash_write(uint32_t addr, const void *buf, uint32_t len, void 
 static int stm32_flash_write(uint32_t addr, const void *buf, uint32_t len, void *user)
 {
     nvlog_stm32_flash_ctx_t *ctx = (nvlog_stm32_flash_ctx_t *)user;
-    uint32_t abs  = ctx->base_addr + addr;
+    uintptr_t abs  = (uintptr_t)ctx->base_addr + (uintptr_t)addr;
     const uint8_t *src = (const uint8_t *)buf;
     uint32_t remaining = len;
 
@@ -257,7 +257,7 @@ static int stm32_flash_write(uint32_t addr, const void *buf, uint32_t len, void 
         for (int i = 0; i < 8; i++) {
             uint32_t v;
             memcpy(&v, word + i * 4, 4);
-            *(volatile uint32_t *)(abs + i * 4) = v;
+            *(volatile uint32_t *)(abs + (uintptr_t)(i * 4u)) = v;
         }
 
         if (flash_wait_ready() != 0) { FLASH_CR &= ~FLASH_CR_PG; return -1; }
@@ -294,18 +294,18 @@ static int stm32_flash_write(uint32_t addr, const void *buf, uint32_t len, void 
 static int stm32_flash_erase(uint32_t addr, uint32_t len, void *user)
 {
     nvlog_stm32_flash_ctx_t *ctx = (nvlog_stm32_flash_ctx_t *)user;
-    uint32_t abs = ctx->base_addr + addr;
+    uintptr_t abs = (uintptr_t)ctx->base_addr + (uintptr_t)addr;
 
     /* compute sector number from absolute address (F407 layout) */
-    uint32_t offset_from_start = abs - 0x08000000UL;
+    uintptr_t offset_from_start = abs - (uintptr_t)0x08000000UL;
     uint32_t sector_num;
 
-    if (offset_from_start < 4 * 16 * 1024)
-        sector_num = offset_from_start / (16 * 1024);
-    else if (offset_from_start < 4 * 16 * 1024 + 64 * 1024)
+    if (offset_from_start < 4u * 16u * 1024u)
+        sector_num = (uint32_t)(offset_from_start / (uintptr_t)(16u * 1024u));
+    else if (offset_from_start < (uintptr_t)(4u * 16u * 1024u + 64u * 1024u))
         sector_num = 4;
     else
-        sector_num = 5 + (offset_from_start - 4 * 16 * 1024 - 64 * 1024) / (128 * 1024);
+        sector_num = 5u + (uint32_t)((offset_from_start - (uintptr_t)(4u * 16u * 1024u + 64u * 1024u)) / (uintptr_t)(128u * 1024u));
 
     (void)len;  /* len must equal sector size — caller's responsibility */
 
@@ -330,8 +330,8 @@ static int stm32_flash_erase(uint32_t addr, uint32_t len, void *user)
 static int stm32_flash_erase(uint32_t addr, uint32_t len, void *user)
 {
     nvlog_stm32_flash_ctx_t *ctx = (nvlog_stm32_flash_ctx_t *)user;
-    uint32_t abs      = ctx->base_addr + addr;
-    uint32_t page_num = (abs - 0x08000000UL) / 2048u;
+    uintptr_t abs      = (uintptr_t)ctx->base_addr + (uintptr_t)addr;
+    uint32_t page_num = (uint32_t)((abs - (uintptr_t)0x08000000UL) / (uintptr_t)2048u);
     uint32_t pages    = len / 2048u;
 
     for (uint32_t p = 0; p < pages; p++) {
@@ -355,8 +355,8 @@ static int stm32_flash_erase(uint32_t addr, uint32_t len, void *user)
 static int stm32_flash_erase(uint32_t addr, uint32_t len, void *user)
 {
     nvlog_stm32_flash_ctx_t *ctx    = (nvlog_stm32_flash_ctx_t *)user;
-    uint32_t                 abs    = ctx->base_addr + addr;
-    uint32_t                 sector = (abs - 0x08000000UL) / (128 * 1024u);
+    uintptr_t                abs    = (uintptr_t)ctx->base_addr + (uintptr_t)addr;
+    uint32_t                 sector = (uint32_t)((abs - (uintptr_t)0x08000000UL) / (uintptr_t)(128u * 1024u));
     uint32_t                 count  = len / (128 * 1024u);
 
     for (uint32_t s = 0; s < count; s++) {
