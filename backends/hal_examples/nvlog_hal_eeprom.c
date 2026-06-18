@@ -123,6 +123,11 @@ nvlog_status_t nvlog_eeprom_init(nvlog_eeprom_ctx_t        *ctx,
     if (!glue->i2c_write || !glue->i2c_read)        return NVLOG_ERR_PARAM;
     if (cfg->page_size == 0 || cfg->capacity == 0)  return NVLOG_ERR_PARAM;
     if (cfg->addr_bytes != 1 && cfg->addr_bytes != 2) return NVLOG_ERR_PARAM;
+    if (cfg->page_size > 128u) return NVLOG_ERR_PARAM;
+    if ((cfg->page_size & (cfg->page_size - 1u)) != 0u) return NVLOG_ERR_PARAM;
+    if (cfg->capacity < cfg->page_size) return NVLOG_ERR_PARAM;
+    if (cfg->capacity % cfg->page_size != 0) return NVLOG_ERR_PARAM;
+    if (cfg->wr_timeout_ms == 0) return NVLOG_ERR_PARAM;
 
     ctx->glue = *glue;
     ctx->cfg  = *cfg;

@@ -13,14 +13,15 @@
  *
  * Record layout (both modes):
  *
- *   [MAGIC:1][FLAGS:1][LEN:2][SEQ:4][PAYLOAD:N][CRC32:4]
+ *   [MAGIC:1][FLAGS:1][LEN:2][SEQ:4][PAYLOAD:N][CRC32:4][COMMIT:1]
  *
  *   MAGIC   - 0x4E ('N'), fast scan anchor
  *   FLAGS   - mode: 0x00=linear, 0x01=ring
  *   LEN     - payload length (uint16)
  *   SEQ     - monotonic, local to this format() call; resets on nvlog_format/ring_format
  *   PAYLOAD - user data
- *   CRC32   - over MAGIC+FLAGS+LEN+SEQ+PAYLOAD (written last = commit)
+ *   CRC32   - over MAGIC+FLAGS+LEN+SEQ+PAYLOAD (written before COMMIT)
+ *   COMMIT  - final byte written last; 0xA5 means committed
  *
  * Ring mode recovery (2-pass, O(n) scan, no heap):
  *   Pass 1: scan all records → find max SEQ → derive write_ptr
@@ -60,7 +61,8 @@ extern "C" {
 #define NVLOG_MEDIA_HEADER_SIZE   (NVLOG_SUPERBLOCK_SIZE * NVLOG_SUPERBLOCK_COUNT)
 #define NVLOG_RECORD_HEADER_SIZE  20u
 #define NVLOG_RECORD_CRC_SIZE     4u
-#define NVLOG_RECORD_OVERHEAD     (NVLOG_RECORD_HEADER_SIZE + NVLOG_RECORD_CRC_SIZE)
+#define NVLOG_RECORD_COMMIT_SIZE  1u
+#define NVLOG_RECORD_OVERHEAD     (NVLOG_RECORD_HEADER_SIZE + NVLOG_RECORD_CRC_SIZE + NVLOG_RECORD_COMMIT_SIZE)
 #define NVLOG_MAX_PAYLOAD         65535u
 #define NVLOG_REGION_HEADER_SIZE  NVLOG_MEDIA_HEADER_SIZE
 

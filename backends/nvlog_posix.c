@@ -8,9 +8,11 @@
 static int posix_read(uint32_t addr, void *buf, uint32_t len, void *user)
 {
     nvlog_posix_ctx_t *p = (nvlog_posix_ctx_t *)user;
+    if (!p || !buf) return -1;
+    if (addr > p->size || len > p->size - addr) return -1;
+    if (!len) return 0;
 
     if (p->ram) {
-        if (addr + len > p->size) return -1;
         memcpy(buf, p->ram + addr, len);
         return 0;
     }
@@ -23,6 +25,8 @@ static int posix_read(uint32_t addr, void *buf, uint32_t len, void *user)
 static int posix_write(uint32_t addr, const void *buf, uint32_t len, void *user)
 {
     nvlog_posix_ctx_t *p = (nvlog_posix_ctx_t *)user;
+    if (!p || (!buf && len > 0)) return -1;
+    if (addr > p->size || len > p->size - addr) return -1;
 
     /* power-loss injection */
     if (p->fail_after >= 0) {
@@ -32,7 +36,6 @@ static int posix_write(uint32_t addr, const void *buf, uint32_t len, void *user)
     }
 
     if (p->ram) {
-        if (addr + len > p->size) return -1;
         memcpy(p->ram + addr, buf, len);
         return 0;
     }

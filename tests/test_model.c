@@ -279,11 +279,13 @@ static int record_valid(const shadow_state_t *s, uint32_t offset, model_record_t
     if (end > s->region_size) return 0;
 
     uint32_t stored_crc = load_u32le(s->bytes + offset + NVLOG_HEADER_SIZE + rec.payload_len);
+    uint8_t commit = s->bytes[offset + NVLOG_HEADER_SIZE + rec.payload_len + sizeof(uint32_t)];
     uint32_t crc2 = 0xFFFFFFFFu;
     for (uint32_t i = 0; i < NVLOG_HEADER_SIZE + rec.payload_len; i++)
         crc2 = crc32_step(crc2, s->bytes[offset + i]);
     crc2 = ~crc2;
     if (stored_crc != crc2) return 0;
+    if (commit != 0x00u) return 0;
 
     if (out) {
         out->seq = rec.seq;
@@ -349,7 +351,6 @@ static void shadow_format(shadow_state_t *s, nvlog_mode_t mode)
         meta = chosen.metadata_seq + 1u;
         if (meta == 0) meta = 1u;
     }
-    memset(s->bytes, 0xFF, s->region_size);
     s->mode = mode;
     s->generation = gen;
     s->metadata_seq = meta;
@@ -387,6 +388,7 @@ static int shadow_append(shadow_state_t *s, const void *payload, uint16_t len, i
     uint32_t base = s->write_ptr;
     uint32_t payload_off = base + NVLOG_HEADER_SIZE;
     uint32_t crc_off = payload_off + len;
+    uint32_t commit_off = crc_off + sizeof(uint32_t);
     wire_record_t rec = {
         .magic = NVLOG_RECORD_MAGIC,
         .type = NVLOG_RECORD_TYPE_DATA,
@@ -404,6 +406,11 @@ static int shadow_append(shadow_state_t *s, const void *payload, uint16_t len, i
     encode_record(hdr, &rec);
 
     int writes = 0;
+    if (fail_after >= 0 && writes >= fail_after) return -1;
+    s->bytes[commit_off] = 0xFFu;
+    s->dirty[commit_off] = 1;
+    writes++;
+
     if (fail_after >= 0 && writes >= fail_after) return -1;
     memcpy(s->bytes + base, hdr, NVLOG_HEADER_SIZE);
     for (uint32_t i = 0; i < NVLOG_HEADER_SIZE && base + i < s->region_size; i++)
@@ -426,6 +433,13 @@ static int shadow_append(shadow_state_t *s, const void *payload, uint16_t len, i
     store_u32le(s->bytes + crc_off, crc);
     for (uint32_t i = 0; i < sizeof(crc) && crc_off + i < s->region_size; i++)
         s->dirty[crc_off + i] = 1;
+    writes++;
+
+    if (fail_after >= 0 && writes >= fail_after) return -1;
+    if (commit_off < s->region_size) {
+        s->bytes[commit_off] = 0x00u;
+        s->dirty[commit_off] = 1;
+    }
 
     if (s->mode == NVLOG_MODE_LINEAR) {
         s->write_ptr = base + total;
@@ -662,7 +676,7 @@ int main(void)
                                                   : nvlog_format(&ctx, &hal, MODEL_SIZE)) == NVLOG_OK);
             have_ctx = 1;
         } else if (op == 2 && have_ctx) {
-            int fail_after = (rand() % 6 == 0) ? (rand() % 3) : -1;
+            int fail_after = (rand() % 6 == 0) ? (rand() % 5) : -1;
             history_add(&hist, "%04d: append len=%u fail_after=%d mode=%u", i, len, fail_after, shadow.mode);
             uint32_t expected_seq = shadow.next_seq;
             uint32_t expected_offset = shadow.write_ptr;

@@ -127,9 +127,19 @@ static int sb_write(nvlog_ctx_t *ctx, uint32_t offset, const nvlog_superblock_t 
     return hal_write(ctx, offset, raw, sizeof(raw));
 }
 
-static int generation_is_newer(uint32_t a, uint32_t b)
+static int u32_is_newer(uint32_t a, uint32_t b)
 {
     return (int32_t)(a - b) > 0;
+}
+
+static int superblock_is_newer(const nvlog_superblock_t *a,
+                               const nvlog_superblock_t *b)
+{
+    if (a->generation != b->generation)
+        return u32_is_newer(a->generation, b->generation);
+    if (a->metadata_seq != b->metadata_seq)
+        return u32_is_newer(a->metadata_seq, b->metadata_seq);
+    return 0;
 }
 
 static uint32_t next_generation_value(uint32_t current)
@@ -178,7 +188,7 @@ static int load_current_superblock(nvlog_ctx_t *ctx, nvlog_superblock_t *out)
     int have_a = sb_read(ctx, 0, &a) == 0;
     int have_b = sb_read(ctx, NVLOG_SUPERBLOCK_SIZE, &b) == 0;
     if (have_a && have_b) {
-        *out = generation_is_newer(a.generation, b.generation) ? a : b;
+        *out = superblock_is_newer(&a, &b) ? a : b;
         return 0;
     }
     if (have_a) { *out = a; return 0; }
@@ -210,19 +220,6 @@ static int hal_read(nvlog_ctx_t *ctx, uint32_t addr, void *buf, uint32_t len)
 static int hal_write(nvlog_ctx_t *ctx, uint32_t addr, const void *buf, uint32_t len)
 {
     return ctx->hal.write(addr, buf, len, ctx->hal.user);
-}
-
-static nvlog_status_t erase_region(nvlog_ctx_t *ctx)
-{
-    uint8_t fill[64];
-    memset(fill, 0xFF, sizeof(fill));
-    for (uint32_t off = 0; off < ctx->region_size; ) {
-        uint32_t n = ctx->region_size - off;
-        if (n > (uint32_t)sizeof(fill)) n = (uint32_t)sizeof(fill);
-        if (hal_write(ctx, off, fill, n) != 0) return NVLOG_ERR_IO;
-        off += n;
-    }
-    return NVLOG_OK;
 }
 
 /* --- verify_record -------------------------------------------- */
@@ -261,7 +258,9 @@ static int verify_record(nvlog_ctx_t *ctx, uint32_t cursor,
     if (!nvlog_u32_add_checked(payload_off, hdr.payload_len, &crc_off)) return NVLOG_ERR_BOUNDS;
 
     uint32_t stored_crc = 0;
+    uint8_t commit = 0x00u;
     if (hal_read(ctx, crc_off, &stored_crc, sizeof(stored_crc)) != 0) return NVLOG_ERR_IO;
+    if (hal_read(ctx, crc_off + sizeof(stored_crc), &commit, sizeof(commit)) != 0) return NVLOG_ERR_IO;
 
     uint32_t crc = crc32_update(0, raw, sizeof(raw));
     uint8_t  chunk[16];
@@ -275,6 +274,7 @@ static int verify_record(nvlog_ctx_t *ctx, uint32_t cursor,
         remaining -= n;
     }
     if (crc != stored_crc) return NVLOG_ERR_CORRUPT;
+    if (commit != 0x00u) return NVLOG_ERR_NO_DATA;
 
     if (hdr_out) {
         hdr_out->magic = hdr.magic;
@@ -310,8 +310,8 @@ static void normalize_write_ptr(nvlog_ctx_t *ctx)
 /* --- nvlog_format --------------------------------------------- */
 
 nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
-                             const nvlog_hal_t *hal,
-                             uint32_t region_size)
+                              const nvlog_hal_t *hal,
+                              uint32_t region_size)
 {
     if (!ctx || !hal || !hal->read || !hal->write)
         return NVLOG_ERR_PARAM;
@@ -342,7 +342,6 @@ nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
     ctx->metadata_seq = metadata_seq;
     ctx->mutation    = 1;
 
-    if (erase_region(ctx) != NVLOG_OK) return NVLOG_ERR_IO;
     nvlog_superblock_t sb = {
         .magic = NVLOG_MEDIA_MAGIC,
         .format_version = NVLOG_MEDIA_VERSION,
@@ -380,6 +379,7 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
 
     nvlog_superblock_t sb;
     if (load_current_superblock(ctx, &sb) != 0) return NVLOG_ERR_CORRUPT;
+    if (sb.mode != NVLOG_MODE_LINEAR) return NVLOG_ERR_UNSUPPORTED;
     ctx->mode = (nvlog_mode_t)sb.mode;
     ctx->generation = sb.generation;
     ctx->metadata_seq = sb.metadata_seq;
@@ -505,16 +505,24 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
     uint32_t base = ctx->write_ptr;
     uint32_t payload_off = 0;
     uint32_t crc_off = 0;
+    uint32_t commit_off = 0;
     if (!nvlog_u32_add_checked(base, NVLOG_HEADER_SIZE, &payload_off))
         return NVLOG_ERR_BOUNDS;
     if (!nvlog_u32_add_checked(payload_off, len, &crc_off))
         return NVLOG_ERR_BOUNDS;
+    if (!nvlog_u32_add_checked(crc_off, sizeof(crc), &commit_off))
+        return NVLOG_ERR_BOUNDS;
 
+    uint8_t commit = 0xFFu;
+    if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0) return NVLOG_ERR_IO;
     if (hal_write(ctx, base, hdr_raw, sizeof(hdr_raw)) != 0) return NVLOG_ERR_IO;
     if (len > 0)
         if (hal_write(ctx, payload_off, payload, len) != 0)
             return NVLOG_ERR_IO;
+    commit = 0x00u;
     if (hal_write(ctx, crc_off, &crc, sizeof(crc)) != 0)
+        return NVLOG_ERR_IO;
+    if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0)
         return NVLOG_ERR_IO;
 
     ctx->write_ptr += total;
@@ -735,18 +743,17 @@ nvlog_status_t nvlog_ring_format(nvlog_ctx_t *ctx,
         if (metadata_seq == 0) metadata_seq = 1u;
     }
 
-    nvlog_status_t st = nvlog_format(ctx, hal, region_size);
-    if (st != NVLOG_OK) return st;
-
-    ctx->mode         = NVLOG_MODE_RING;
-    ctx->tail_ptr     = (uint32_t)NVLOG_REGION_HEADER_SIZE;
-    ctx->ring_full    = 0;
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->hal         = *hal;
+    ctx->region_size = region_size;
+    ctx->write_ptr   = (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    ctx->tail_ptr    = (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    ctx->mode        = NVLOG_MODE_RING;
     ctx->record_count = 0;
-    ctx->generation   = generation;
+    ctx->generation  = generation;
     ctx->metadata_seq = metadata_seq;
-    ctx->mutation++;
+    ctx->mutation    = 1;
 
-    if (erase_region(ctx) != NVLOG_OK) return NVLOG_ERR_IO;
     nvlog_superblock_t sb = {
         .magic = NVLOG_MEDIA_MAGIC,
         .format_version = NVLOG_MEDIA_VERSION,
@@ -760,6 +767,7 @@ nvlog_status_t nvlog_ring_format(nvlog_ctx_t *ctx,
     };
     if (sb_write(ctx, 0, &sb) != 0) return NVLOG_ERR_IO;
     if (sb_write(ctx, NVLOG_SUPERBLOCK_SIZE, &sb) != 0) return NVLOG_ERR_IO;
+    ctx->mounted = 1;
     return NVLOG_OK;
 }
 
@@ -778,7 +786,7 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
 
     nvlog_superblock_t sb;
     if (load_current_superblock(ctx, &sb) != 0) return NVLOG_ERR_CORRUPT;
-    if (sb.mode != NVLOG_MODE_RING) return NVLOG_ERR_CORRUPT;
+    if (sb.mode != NVLOG_MODE_RING) return NVLOG_ERR_UNSUPPORTED;
     ctx->generation = sb.generation;
     ctx->metadata_seq = sb.metadata_seq;
 

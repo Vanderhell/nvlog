@@ -55,8 +55,10 @@ static int spi_write(uint32_t addr, const void *buf, uint32_t len, void *user)
     /* WREN — must be sent before every write on SPI FRAM */
     uint8_t wren = NVLOG_FRAM_SPI_OP_WREN;
     g->cs_set(1, g->user);
-    g->transfer(&wren, NULL, 1, g->user);
+    int rc = g->transfer(&wren, NULL, 1, g->user);
     g->cs_set(0, g->user);
+    if (rc != 0)
+        return rc;
 
     /* WRITE opcode + address */
     uint8_t hdr[4];
@@ -65,7 +67,7 @@ static int spi_write(uint32_t addr, const void *buf, uint32_t len, void *user)
     uint8_t hdr_len  = 1u + addr_len;
 
     g->cs_set(1, g->user);
-    int rc = g->transfer(hdr, NULL, hdr_len, g->user);
+    rc = g->transfer(hdr, NULL, hdr_len, g->user);
     if (rc == 0)
         rc = g->transfer((const uint8_t *)buf, NULL, len, g->user);
     g->cs_set(0, g->user);

@@ -10,10 +10,12 @@
  * nvlog_append() issues these writes in order:
  *   1. header  (MAGIC+FLAGS+LEN+SEQ = 8 bytes)
  *   2. payload (N bytes, may be split into multiple HAL calls if large)
- *   3. CRC32   (4 bytes) ← commit point
+ *   3. CRC32   (4 bytes)
+ *   4. COMMIT  (1 byte) ← commit point
  *
- * Failing before write 3 = record invisible after recovery.
+ * Failing before write 4 = record invisible after recovery.
  * Failing during write 3 = CRC partially written = bad CRC = invisible.
+ * Failing during write 4 = CRC written but commit missing = invisible.
  *
  * Tests:
  *   PL-01  fail before header        → 0 records after mount
@@ -274,30 +276,34 @@ static void test_pl08(void)
 
     /*
      * For a single-append sequence, writes issued are:
-     *   index 0: region header (nvlog_format)
+     *   index 0: commit placeholder byte (cleared to 0x00)
      *   index 1: record header
      *   index 2: record payload
-     *   index 3: CRC (commit)
+     *   index 3: CRC
+     *   index 4: commit byte
      *
-     * Failing at index 0..2 → 0 records after mount
-     * Failing at index 3    → 0 records (CRC not written)
+     * Failing at index 0..4 → 0 records after mount
      * No failure (index=99) → 1 record
      */
 
     /*
      * nvlog_posix_inject_fail_after(N): allows N writes, fails on write N.
      *
-     * nvlog_append("test",4) issues exactly 3 writes after format:
-     *   write 0: record header  (8B)
-     *   write 1: record payload (4B)
-     *   write 2: CRC32          (4B) — commit point
+     * nvlog_append("test",4) issues exactly 5 writes after format:
+     *   write 0: commit placeholder (1B)
+     *   write 1: record header      (8B)
+     *   write 2: record payload     (4B)
+     *   write 3: CRC32             (4B)
+     *   write 4: COMMIT             (1B) — commit point
      *
-     * fail_after=0 → header fails  → 0 records after mount
-     * fail_after=1 → payload fails → 0 records after mount
-     * fail_after=2 → CRC fails     → 0 records after mount
-     * fail_after=3 → all succeed   → 1 record  after mount
+     * fail_after=0 → placeholder fails → 0 records after mount
+     * fail_after=1 → header fails      → 0 records after mount
+     * fail_after=2 → payload fails     → 0 records after mount
+     * fail_after=3 → CRC fails         → 0 records after mount
+     * fail_after=4 → commit fails       → 0 records after mount
+     * fail_after=5 → all succeed        → 1 record  after mount
      */
-    for (int32_t fail_after = 0; fail_after <= 3; fail_after++) {
+    for (int32_t fail_after = 0; fail_after <= 5; fail_after++) {
         nvlog_posix_ctx_t pctx; nvlog_hal_t hal; fresh_ram(&pctx, &hal);
         nvlog_ctx_t ctx;
         nvlog_format(&ctx, &hal, NVM_SIZE);
@@ -307,7 +313,7 @@ static void test_pl08(void)
         nvlog_posix_inject_fail_after(&pctx, -1);
 
         int n = mount_and_count(&hal);
-        if (fail_after < 3) {
+        if (fail_after < 5) {
             CHECK(n == 0);   /* any pre-commit failure → invisible */
         } else {
             CHECK(n == 1);   /* all writes ok → visible */

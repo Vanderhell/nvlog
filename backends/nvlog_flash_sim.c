@@ -8,7 +8,8 @@
 static int sim_read(uint32_t addr, void *buf, uint32_t len, void *user)
 {
     nvlog_flash_sim_ctx_t *s = (nvlog_flash_sim_ctx_t *)user;
-    if (addr + len > s->size) return -1;
+    if (!s || !buf) return -1;
+    if (addr > s->size || len > s->size - addr) return -1;
     memcpy(buf, s->mem + addr, len);
     return 0;
 }
@@ -18,7 +19,8 @@ static int sim_write(uint32_t addr, const void *buf, uint32_t len, void *user)
     nvlog_flash_sim_ctx_t *s   = (nvlog_flash_sim_ctx_t *)user;
     const uint8_t         *src = (const uint8_t *)buf;
 
-    if (addr + len > s->size) return -1;
+    if (!s || (!src && len > 0)) return -1;
+    if (addr > s->size || len > s->size - addr) return -1;
 
     /* power-loss injection */
     if (s->fail_after_write >= 0) {
@@ -52,7 +54,7 @@ static int sim_erase(uint32_t addr, uint32_t len, void *user)
 
     if (addr % s->sector_size != 0) return -1;
     if (len  % s->sector_size != 0) return -1;
-    if (addr + len > s->size)       return -1;
+    if (addr > s->size || len > s->size - addr) return -1;
 
     /* power-loss injection */
     if (s->fail_after_erase >= 0) {
@@ -79,6 +81,7 @@ int nvlog_flash_sim_open(nvlog_flash_sim_ctx_t *sim,
 {
     if (!sim || !flash_out || size == 0 || sector_size == 0) return -1;
     if (size % sector_size != 0) return -1;
+    if (size / sector_size > 256u) return -1;
 
     memset(sim, 0, sizeof(*sim));
     sim->mem        = (uint8_t *)malloc(size);

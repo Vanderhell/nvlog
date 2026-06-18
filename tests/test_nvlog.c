@@ -330,6 +330,36 @@ static void test_mount_unformatted(void)
     nvlog_posix_close(&pctx);
 }
 
+/* â”€â”€â”€ test 10: mode/version validation on superblocks â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+static void test_superblock_validation(void)
+{
+    TEST("superblock mode + version validation");
+
+    nvlog_ctx_t       ctx;
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t       hal;
+    make_ctx(&ctx, &pctx, &hal);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "one", 3) == NVLOG_OK);
+
+    /* Ring mount against linear media must reject the mode mismatch. */
+    CHECK(nvlog_ring_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_UNSUPPORTED);
+
+    /* Reformat for ring and ensure linear mount rejects it. */
+    CHECK(nvlog_ring_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_UNSUPPORTED);
+
+    /* Explicit v0.4 rejection: corrupt both superblocks to version 0x04. */
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    pctx.ram[2] = 0x04u;
+    pctx.ram[NVLOG_SUPERBLOCK_SIZE + 2] = 0x04u;
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_CORRUPT);
+
+    nvlog_posix_close(&pctx);
+}
+
 /* ─── main ────────────────────────────────────────────────────── */
 
 int main(void)
@@ -346,6 +376,7 @@ int main(void)
     test_stats();
     test_zero_payload();
     test_mount_unformatted();
+    test_superblock_validation();
 
     printf("\n=====================\n");
     printf("PASSED: %d\n", g_pass);

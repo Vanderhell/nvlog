@@ -52,6 +52,8 @@ nvlog_status_t nvlog_espidf_partition_init(nvlog_espidf_partition_ctx_t *ctx,
     if (!ctx || !flash_out || !partition) return NVLOG_ERR_PARAM;
     if (capacity == 0 || erase_size == 0 || program_size == 0) return NVLOG_ERR_PARAM;
     if (capacity % erase_size != 0) return NVLOG_ERR_PARAM;
+    if (program_size > erase_size) return NVLOG_ERR_PARAM;
+    if (erase_size % program_size != 0) return NVLOG_ERR_PARAM;
 
     memset(ctx, 0, sizeof(*ctx));
     ctx->partition = partition;
