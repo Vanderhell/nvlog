@@ -67,6 +67,7 @@ add_executable(test_ring       tests/test_ring.c)
 add_executable(test_wire       tests/test_wire.c)
 add_executable(compile_public_c tests/compile_public_c.c)
 add_executable(compile_public_cpp tests/compile_public_cpp.cpp)
+add_executable(test_model       tests/test_model.c)
 
 foreach(t test_nvlog test_powerloss test_ring)
     target_include_directories(${t} PRIVATE include backends)
@@ -85,6 +86,9 @@ target_link_libraries(compile_public_c nvlog)
 target_include_directories(compile_public_cpp PRIVATE include backends)
 target_link_libraries(compile_public_cpp nvlog)
 
+target_include_directories(test_model PRIVATE include backends)
+target_link_libraries(test_model nvlog nvlog_posix)
+
 enable_testing()
 add_test(NAME suite_v01 COMMAND test_nvlog)
 add_test(NAME suite_v02 COMMAND test_powerloss)
@@ -93,6 +97,7 @@ add_test(NAME suite_v04 COMMAND test_ring)
 add_test(NAME suite_v05 COMMAND test_wire)
 add_test(NAME suite_v06 COMMAND compile_public_c)
 add_test(NAME suite_v07 COMMAND compile_public_cpp)
+add_test(NAME suite_v08 COMMAND test_model)
 
-set_tests_properties(suite_v01 suite_v02 suite_v03 suite_v04 suite_v05 suite_v06 suite_v07
+set_tests_properties(suite_v01 suite_v02 suite_v03 suite_v04 suite_v05 suite_v06 suite_v07 suite_v08
     PROPERTIES TIMEOUT 30)
