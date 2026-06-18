@@ -1,5 +1,5 @@
 /**
- * tests/test_powerloss.c — extended power-loss tests (v0.2)
+ * tests/test_powerloss.c — extended power-loss tests
  *
  * Strategy: inject power-loss at every possible write call
  * within nvlog_append(), verify that after nvlog_mount():
@@ -68,7 +68,7 @@ static uint32_t count_records(nvlog_ctx_t *ctx)
 }
 
 /* mount and count; returns -1 on mount error */
-static int mount_and_count(nvlog_posix_ctx_t *pctx, nvlog_hal_t *hal)
+static int mount_and_count(nvlog_hal_t *hal)
 {
     nvlog_ctx_t ctx;
     if (nvlog_mount(&ctx, hal, NVM_SIZE) != NVLOG_OK) return -1;
@@ -88,7 +88,7 @@ static void test_pl01(void)
     nvlog_append(&ctx, "data", 4);            /* will fail */
 
     nvlog_posix_inject_fail_after(&pctx, -1);
-    CHECK(mount_and_count(&pctx, &hal) == 0);
+    CHECK(mount_and_count(&hal) == 0);
 
     nvlog_posix_close(&pctx);
 }
@@ -108,7 +108,7 @@ static void test_pl02(void)
     nvlog_append(&ctx, "payload", 7);
 
     nvlog_posix_inject_fail_after(&pctx, -1);
-    CHECK(mount_and_count(&pctx, &hal) == 0);
+    CHECK(mount_and_count(&hal) == 0);
 
     nvlog_posix_close(&pctx);
 }
@@ -127,7 +127,7 @@ static void test_pl03(void)
     nvlog_append(&ctx, "payload", 7);
 
     nvlog_posix_inject_fail_after(&pctx, -1);
-    CHECK(mount_and_count(&pctx, &hal) == 0);
+    CHECK(mount_and_count(&hal) == 0);
 
     nvlog_posix_close(&pctx);
 }
@@ -143,7 +143,7 @@ static void test_pl04(void)
 
     CHECK(nvlog_append(&ctx, "ok", 2) == NVLOG_OK);
 
-    CHECK(mount_and_count(&pctx, &hal) == 1);
+    CHECK(mount_and_count(&hal) == 1);
 
     nvlog_posix_close(&pctx);
 }
@@ -165,7 +165,7 @@ static void test_pl05(void)
     nvlog_append(&ctx, "third", 5);
 
     nvlog_posix_inject_fail_after(&pctx, -1);
-    int n = mount_and_count(&pctx, &hal);
+    int n = mount_and_count(&hal);
     CHECK(n == 2);
 
     /* verify content */
@@ -306,7 +306,7 @@ static void test_pl08(void)
         nvlog_append(&ctx, "test", 4);
         nvlog_posix_inject_fail_after(&pctx, -1);
 
-        int n = mount_and_count(&pctx, &hal);
+        int n = mount_and_count(&hal);
         if (fail_after < 3) {
             CHECK(n == 0);   /* any pre-commit failure → invisible */
         } else {
@@ -321,7 +321,7 @@ static void test_pl08(void)
 
 int main(void)
 {
-    printf("nvlog v0.2 — power-loss test suite\n");
+    printf("nvlog power-loss test suite\n");
     printf("====================================\n");
 
     test_pl01();

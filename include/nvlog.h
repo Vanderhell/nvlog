@@ -3,10 +3,8 @@
  *
  * Supports two modes:
  *
- *   LINEAR (v0.1+): append-only, stops when full.
- *   RING   (v0.4+): circular, overwrites oldest records when full.
- *                   Byte-writable backends only (FRAM/EEPROM/RAM).
- *                   NOT for NOR flash (requires erase before write).
+ *   LINEAR: append-only, stops when full.
+ *   RING:   circular, overwrites oldest records when full.
  *
  * Memory layout:
  *
@@ -80,6 +78,8 @@ typedef enum {
     NVLOG_ERR_NO_DATA     = -5,  /* iterator exhausted / ring is empty */
     NVLOG_ERR_TOO_LARGE   = -6,  /* payload exceeds NVLOG_MAX_PAYLOAD */
     NVLOG_ERR_NOT_MOUNTED = -7,  /* nvlog_mount() not called */
+    NVLOG_ERR_STALE       = -8,  /* iterator or descriptor snapshot invalid */
+    NVLOG_ERR_BOUNDS      = -9,  /* checked arithmetic or range validation failed */
 } nvlog_status_t;
 
 /* --- HAL — byte-writable backends only ------------------------ */
@@ -127,9 +127,10 @@ typedef struct {
     uint32_t      region_size;   /* total NVM bytes available */
     uint32_t      write_ptr;     /* byte offset of next write */
     uint32_t      next_seq;      /* next sequence number to assign */
+    uint32_t      mutation;      /* increments on mount/format/append */
     uint8_t       mounted;       /* 1 after successful nvlog_mount() */
 
-    /* v0.4 ring mode — zero-initialised = linear, backward compatible */
+    /* ring mode fields */
     nvlog_mode_t  mode;          /* NVLOG_MODE_LINEAR or NVLOG_MODE_RING */
     uint32_t      tail_ptr;      /* oldest record offset (ring mode only) */
     uint8_t       ring_full;     /* 1 when ring has wrapped at least once */
@@ -151,9 +152,10 @@ typedef struct {
     nvlog_ctx_t  *ctx;
     uint32_t      cursor;      /* current NVM offset */
     uint32_t      count;       /* records yielded so far */
-    /* v0.4 ring mode fields */
+    /* ring mode fields */
     uint32_t      stop_ptr;    /* where to stop (write_ptr in ring mode) */
     uint8_t       wrapped;     /* 1 after cursor has wrapped around */
+    uint32_t      snapshot_mutation; /* ctx mutation observed at init */
 } nvlog_iter_t;
 
 /* --- API ------------------------------------------------------- */
@@ -232,7 +234,7 @@ typedef struct {
 
 nvlog_status_t nvlog_stats(nvlog_ctx_t *ctx, nvlog_stats_t *out);
 
-/* --- ring mode API (v0.4) -------------------------------------- */
+/* --- ring mode API --------------------------------------------- */
 
 /**
  * nvlog_ring_format() — initialise a region for ring (circular) mode.

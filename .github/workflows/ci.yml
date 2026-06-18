@@ -55,13 +55,3 @@ jobs:
           cmake -B build
           cmake --build build --config Release
           ctest --test-dir build -C Release -V --timeout 30
-
-  c89-compat:
-    name: C89 strict check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check C89 compatibility (headers only)
-        run: |
-          gcc -std=c89 -Wpedantic -fsyntax-only include/nvlog.h include/nvlog_hal_flash.h

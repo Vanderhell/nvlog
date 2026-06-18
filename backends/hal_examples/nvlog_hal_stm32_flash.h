@@ -1,5 +1,5 @@
 /**
- * nvlog_hal_stm32_flash.h — STM32 internal flash HAL for nvlog (v0.3)
+ * nvlog_hal_stm32_flash.h — STM32 internal flash HAL for nvlog
  *
  * Supports three STM32 flash controller families, selected at compile time
  * via a define (or auto-detected from CMSIS device header):

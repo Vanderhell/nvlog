@@ -39,7 +39,7 @@ static int posix_write(uint32_t addr, const void *buf, uint32_t len, void *user)
 
     if (fseek(p->fp, (long)addr, SEEK_SET) != 0) return -1;
     if (fwrite(buf, 1, len, p->fp) != len)        return -1;
-    fflush(p->fp);
+    if (fflush(p->fp) != 0) return -1;
     return 0;
 }
 
@@ -57,10 +57,21 @@ int nvlog_posix_open_file(nvlog_posix_ctx_t *pctx,
     pctx->size       = size;
 
     /* open or create */
-    FILE *fp = fopen(path, "r+b");
+    FILE *fp = NULL;
+#ifdef _MSC_VER
+    if (fopen_s(&fp, path, "r+b") != 0)
+        fp = NULL;
+#else
+    fp = fopen(path, "r+b");
+#endif
     if (!fp) {
         /* create and pre-fill with 0xFF (simulates erased NVM) */
+#ifdef _MSC_VER
+        if (fopen_s(&fp, path, "w+b") != 0)
+            fp = NULL;
+#else
         fp = fopen(path, "w+b");
+#endif
         if (!fp) return -1;
         uint8_t fill = 0xFF;
         for (uint32_t i = 0; i < size; i++)

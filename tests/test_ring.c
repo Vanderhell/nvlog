@@ -1,5 +1,5 @@
 /**
- * tests/test_ring.c — Ring mode test suite (v0.4)
+ * tests/test_ring.c — Ring mode test suite
  *
  * Tests:
  *   RG-01  basic ring: append + iter (no wrap yet)
@@ -435,7 +435,7 @@ static void test_rg14(void)
 
 int main(void)
 {
-    printf("nvlog v0.4 — ring mode test suite\n");
+    printf("nvlog ring mode test suite\n");
     printf("===================================\n");
 
     test_rg01();

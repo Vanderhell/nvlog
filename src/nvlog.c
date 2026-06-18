@@ -1,5 +1,5 @@
 /**
- * nvlog.c — implementation (v0.4, ring mode)
+ * nvlog.c — implementation
  *
  * Ring mode invariant: write_ptr is ALWAYS in [REGION_HEADER_SIZE, region_size).
  * After writing a record that fills exactly to region_size, write_ptr is
@@ -9,6 +9,7 @@
 
 #include "nvlog.h"
 #include <string.h>
+#include "nvlog_wire.h"
 
 /* --- internal record header ----------------------------------- */
 
@@ -39,7 +40,7 @@ static uint32_t crc32_update(uint32_t crc, const uint8_t *data, uint32_t len)
     while (len--) {
         crc ^= *data++;
         for (int i = 0; i < 8; i++)
-            crc = (crc >> 1) ^ (0xEDB88320UL & -(crc & 1));
+            crc = (crc >> 1) ^ (0xEDB88320UL & (0u - (crc & 1u)));
     }
     return ~crc;
 }
@@ -65,12 +66,18 @@ static int verify_record(nvlog_ctx_t *ctx, uint32_t cursor,
     if (hal_read(ctx, cursor, &hdr, sizeof(hdr)) != 0) return -1;
     if (hdr.magic != NVLOG_RECORD_MAGIC)               return -1;
 
-    uint32_t total = NVLOG_RECORD_OVERHEAD + hdr.len;
-    if (cursor + total > ctx->region_size)             return -1;
+    uint32_t total = 0;
+    uint32_t end = 0;
+    uint32_t crc_off = 0;
+    if (!nvlog_u32_add_checked(NVLOG_RECORD_OVERHEAD, (uint32_t)hdr.len, &total))
+        return -1;
+    if (!nvlog_u32_add_checked(cursor, total, &end)) return -1;
+    if (end > ctx->region_size)                      return -1;
 
     uint32_t stored_crc = 0;
-    if (hal_read(ctx, cursor + NVLOG_HEADER_SIZE + hdr.len,
-                 &stored_crc, sizeof(stored_crc)) != 0) return -1;
+    if (!nvlog_u32_add_checked(cursor, NVLOG_HEADER_SIZE, &crc_off)) return -1;
+    if (!nvlog_u32_add_checked(crc_off, hdr.len, &crc_off)) return -1;
+    if (hal_read(ctx, crc_off, &stored_crc, sizeof(stored_crc)) != 0) return -1;
 
     uint32_t crc = crc32_update(0, (const uint8_t *)&hdr, sizeof(hdr));
     uint8_t  chunk[16];
@@ -124,6 +131,7 @@ nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
     ctx->tail_ptr    = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     ctx->mode        = NVLOG_MODE_LINEAR;
     ctx->record_count = 0;
+    ctx->mutation    = 1;
 
     nvlog_region_header_t rh;
     rh.magic       = NVLOG_REGION_MAGIC;
@@ -149,6 +157,7 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     ctx->write_ptr   = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     ctx->tail_ptr    = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     ctx->mode        = NVLOG_MODE_LINEAR;
+    ctx->mutation    = 1;
 
     nvlog_region_header_t rh;
     if (hal_read(ctx, 0, &rh, sizeof(rh)) != 0) return NVLOG_ERR_IO;
@@ -219,7 +228,9 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
     if (!ctx->mounted)                 return NVLOG_ERR_NOT_MOUNTED;
     (void)NVLOG_MAX_PAYLOAD;
 
-    uint32_t total = NVLOG_RECORD_OVERHEAD + len;
+    uint32_t total = 0;
+    if (!nvlog_u32_add_checked(NVLOG_RECORD_OVERHEAD, (uint32_t)len, &total))
+        return NVLOG_ERR_BOUNDS;
 
     uint32_t evicted = 0;
 
@@ -228,7 +239,10 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
         if (total > capacity) return NVLOG_ERR_FULL;
 
         /* wrap if record doesn't fit before region end */
-        if (ctx->write_ptr + total > ctx->region_size) {
+        uint32_t write_end = 0;
+        if (!nvlog_u32_add_checked(ctx->write_ptr, total, &write_end))
+            return NVLOG_ERR_BOUNDS;
+        if (write_end > ctx->region_size) {
             ctx->write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
             ctx->ring_full = 1;
         }
@@ -238,7 +252,10 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
             evicted = ring_advance_tail(ctx, ctx->write_ptr, total);
 
     } else {
-        if (ctx->write_ptr + total > ctx->region_size)
+        uint32_t write_end = 0;
+        if (!nvlog_u32_add_checked(ctx->write_ptr, total, &write_end))
+            return NVLOG_ERR_BOUNDS;
+        if (write_end > ctx->region_size)
             return NVLOG_ERR_FULL;
     }
 
@@ -254,16 +271,23 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
         crc = crc32_update(crc, (const uint8_t *)payload, len);
 
     uint32_t base = ctx->write_ptr;
+    uint32_t payload_off = 0;
+    uint32_t crc_off = 0;
+    if (!nvlog_u32_add_checked(base, NVLOG_HEADER_SIZE, &payload_off))
+        return NVLOG_ERR_BOUNDS;
+    if (!nvlog_u32_add_checked(payload_off, len, &crc_off))
+        return NVLOG_ERR_BOUNDS;
 
     if (hal_write(ctx, base, &hdr, sizeof(hdr)) != 0) return NVLOG_ERR_IO;
     if (len > 0)
-        if (hal_write(ctx, base + NVLOG_HEADER_SIZE, payload, len) != 0)
+        if (hal_write(ctx, payload_off, payload, len) != 0)
             return NVLOG_ERR_IO;
-    if (hal_write(ctx, base + NVLOG_HEADER_SIZE + len, &crc, sizeof(crc)) != 0)
+    if (hal_write(ctx, crc_off, &crc, sizeof(crc)) != 0)
         return NVLOG_ERR_IO;
 
     ctx->write_ptr += total;
     ctx->next_seq++;
+    ctx->mutation++;
 
     /* KEY: normalize write_ptr — must never equal region_size in ring mode */
     normalize_write_ptr(ctx);
@@ -286,6 +310,7 @@ nvlog_status_t nvlog_iter_init(nvlog_iter_t *it, nvlog_ctx_t *ctx)
 
     memset(it, 0, sizeof(*it));
     it->ctx = ctx;
+    it->snapshot_mutation = ctx->mutation;
 
     if (ctx->mode == NVLOG_MODE_RING) {
         it->cursor   = ctx->tail_ptr;
@@ -302,6 +327,8 @@ nvlog_status_t nvlog_iter_init(nvlog_iter_t *it, nvlog_ctx_t *ctx)
 nvlog_status_t nvlog_iter_next(nvlog_iter_t *it, nvlog_record_t *out)
 {
     if (!it || !out) return NVLOG_ERR_PARAM;
+    if (!it->ctx || !it->ctx->mounted) return NVLOG_ERR_NOT_MOUNTED;
+    if (it->snapshot_mutation != it->ctx->mutation) return NVLOG_ERR_STALE;
     nvlog_ctx_t *ctx = it->ctx;
 
     if (ctx->mode == NVLOG_MODE_RING) {
@@ -384,7 +411,22 @@ nvlog_status_t nvlog_read_payload(nvlog_ctx_t *ctx,
     if (!ctx || !record || !buf) return NVLOG_ERR_PARAM;
     if (!ctx->mounted)           return NVLOG_ERR_NOT_MOUNTED;
     if (buf_size < record->len)  return NVLOG_ERR_PARAM;
-    if (hal_read(ctx, record->offset + NVLOG_HEADER_SIZE, buf, record->len) != 0)
+    uint32_t header_off = 0;
+    uint32_t payload_off = 0;
+    if (!nvlog_u32_add_checked(record->offset, NVLOG_HEADER_SIZE, &header_off))
+        return NVLOG_ERR_BOUNDS;
+    if (!nvlog_u32_add_checked(header_off, record->len, &payload_off))
+        return NVLOG_ERR_BOUNDS;
+    if (payload_off > ctx->region_size) return NVLOG_ERR_BOUNDS;
+
+    nvlog_rec_hdr_t hdr;
+    uint32_t total = 0;
+    if (verify_record(ctx, record->offset, &hdr, &total) != 0)
+        return NVLOG_ERR_CORRUPT;
+    if (hdr.seq != record->seq || hdr.len != record->len)
+        return NVLOG_ERR_STALE;
+
+    if (hal_read(ctx, header_off, buf, record->len) != 0)
         return NVLOG_ERR_IO;
     return NVLOG_OK;
 }

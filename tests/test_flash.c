@@ -1,5 +1,5 @@
 /**
- * tests/test_flash.c — NOR flash backend tests (v0.3)
+ * tests/test_flash.c — NOR flash backend tests
  *
  * Tests:
  *   FL-01  format erases region (all 0xFF after format, then header written)
@@ -290,7 +290,7 @@ static void test_fl10(void)
 
 int main(void)
 {
-    printf("nvlog v0.3 — flash backend test suite\n");
+    printf("nvlog flash backend test suite\n");
     printf("=======================================\n");
 
     test_fl01();

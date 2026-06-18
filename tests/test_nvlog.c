@@ -334,7 +334,7 @@ static void test_mount_unformatted(void)
 
 int main(void)
 {
-    printf("nvlog v0.1 test suite\n");
+    printf("nvlog test suite\n");
     printf("=====================\n");
 
     test_basic();

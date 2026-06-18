@@ -18,7 +18,7 @@
  *   For SPI: spi_transfer, cs_set
  *   For I2C: i2c_write, i2c_read
  *
- * Tested against:
+ * Host-side test coverage:
  *   MB85RS256B  (32KB SPI FRAM)
  *   MB85RC256V  (32KB I2C FRAM)
  *   Simulated via nvlog_posix RAM backend in unit tests
