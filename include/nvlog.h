@@ -226,7 +226,7 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
  */
 nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
                              const void *payload,
-                             uint16_t len);
+                             size_t len);
 
 /**
  * nvlog_iter_init() — start iterating from oldest record.

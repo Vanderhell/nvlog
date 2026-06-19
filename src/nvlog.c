@@ -730,14 +730,16 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
 /* --- nvlog_append --------------------------------------------- */
 
 nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
-                             const void *payload,
-                             uint16_t len)
+                              const void *payload,
+                              size_t len)
 {
     if (!ctx || (!payload && len > 0)) return NVLOG_ERR_PARAM;
     if (!ctx->mounted)                 return NVLOG_ERR_NOT_MOUNTED;
+    if (len > UINT32_MAX)              return NVLOG_ERR_TOO_LARGE;
     if (len > NVLOG_MAX_PAYLOAD)       return NVLOG_ERR_TOO_LARGE;
 
-    uint32_t total = rec_total_bytes((uint32_t)len);
+    uint32_t payload_len = (uint32_t)len;
+    uint32_t total = rec_total_bytes(payload_len);
     uint32_t evicted = 0;
 
     if (ctx->mode == NVLOG_MODE_RING) {
@@ -829,9 +831,9 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
                                        NVLOG_MODE_RING,
                                        ctx->next_seq,
                                        ctx->generation,
-                                       payload,
-                                       len,
-                                       &written);
+                                        payload,
+                                        payload_len,
+                                        &written);
             if (rc != NVLOG_OK) return (nvlog_status_t)rc;
             ctx->write_ptr = base + written;
             if (ctx->write_ptr >= ctx->region_size)
@@ -862,9 +864,9 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
                                    NVLOG_MODE_LINEAR,
                                    ctx->next_seq,
                                    ctx->generation,
-                                   payload,
-                                   len,
-                                   &written);
+                                    payload,
+                                    payload_len,
+                                    &written);
         if (rc != NVLOG_OK) return (nvlog_status_t)rc;
         ctx->write_ptr += written;
         ctx->next_seq++;
@@ -883,8 +885,8 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
     hdr.flags = (ctx->mode == NVLOG_MODE_RING) ? NVLOG_FLAGS_RING : NVLOG_FLAGS_LINEAR;
     hdr.generation = ctx->generation;
     hdr.seq = ctx->next_seq;
-    hdr.payload_len = len;
-    hdr.total_len = (uint16_t)(NVLOG_RECORD_OVERHEAD + len);
+    hdr.payload_len = payload_len;
+    hdr.total_len = (uint32_t)(NVLOG_RECORD_OVERHEAD + payload_len);
     hdr.crc32 = 0;
 
     uint8_t hdr_raw[NVLOG_HEADER_SIZE];
@@ -893,8 +895,8 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
     rec_encode(hdr_raw, &hdr);
 
     uint32_t crc = crc32_update(0, hdr_raw, sizeof(hdr_raw));
-    if (len > 0)
-        crc = crc32_update(crc, (const uint8_t *)payload, len);
+    if (payload_len > 0)
+        crc = crc32_update(crc, (const uint8_t *)payload, payload_len);
 
     uint32_t base = ctx->write_ptr;
     uint32_t payload_off = 0;
@@ -902,7 +904,7 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
     uint32_t commit_off = 0;
     if (!nvlog_u32_add_checked(base, NVLOG_HEADER_SIZE, &payload_off))
         return NVLOG_ERR_BOUNDS;
-    if (!nvlog_u32_add_checked(payload_off, len, &crc_off))
+    if (!nvlog_u32_add_checked(payload_off, payload_len, &crc_off))
         return NVLOG_ERR_BOUNDS;
     if (!nvlog_u32_add_checked(crc_off, sizeof(crc), &commit_off))
         return NVLOG_ERR_BOUNDS;
@@ -910,8 +912,8 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
     uint8_t commit = 0xFFu;
     if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0) return NVLOG_ERR_IO;
     if (hal_write(ctx, base, hdr_raw, sizeof(hdr_raw)) != 0) return NVLOG_ERR_IO;
-    if (len > 0)
-        if (hal_write(ctx, payload_off, payload, len) != 0)
+    if (payload_len > 0)
+        if (hal_write(ctx, payload_off, payload, payload_len) != 0)
             return NVLOG_ERR_IO;
     commit = 0x00u;
     if (hal_write(ctx, crc_off, &crc, sizeof(crc)) != 0)

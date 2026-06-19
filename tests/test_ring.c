@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #include "../include/nvlog.h"
 #include "../backends/nvlog_posix.h"
@@ -158,6 +159,39 @@ static void test_max_record(void)
     memset(payload, 0xA5, sizeof(payload));
     CHECK(nvlog_append(&ctx, payload, (uint16_t)sizeof(payload)) == NVLOG_OK);
     assert_stats(&ctx, NVLOG_RECORD_OVERHEAD + NVLOG_MAX_PAYLOAD, ctx.free_bytes, 1, 1);
+
+    close_ring(&pctx);
+}
+
+static void test_length_limits(void)
+{
+    TEST("ring length limits");
+    uint32_t size = ring_size(NVLOG_MAX_PAYLOAD + 128u);
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    uint8_t payload[NVLOG_MAX_PAYLOAD];
+    memset(payload, 0x5Au, sizeof(payload));
+
+    CHECK(nvlog_append(&ctx, payload, (size_t)UINT16_MAX - 1u) == NVLOG_OK);
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, payload, (size_t)UINT16_MAX) == NVLOG_OK);
+
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    uint8_t dummy = 0;
+    CHECK(nvlog_append(&ctx, &dummy, (size_t)UINT16_MAX + 1u) == NVLOG_ERR_TOO_LARGE);
+    CHECK(nvlog_append(&ctx, &dummy, (size_t)UINT32_MAX - 1u) == NVLOG_ERR_TOO_LARGE);
+    CHECK(nvlog_append(&ctx, &dummy, (size_t)UINT32_MAX) == NVLOG_ERR_TOO_LARGE);
+#if SIZE_MAX > UINT32_MAX
+    CHECK(nvlog_append(&ctx, &dummy, SIZE_MAX) == NVLOG_ERR_TOO_LARGE);
+#endif
+
+    nvlog_record_t recs[4];
+    uint32_t n = collect_records(&ctx, recs, 4);
+    CHECK(n == 0u);
 
     close_ring(&pctx);
 }
@@ -431,6 +465,7 @@ int main(void)
     test_one_record();
     test_zero_length();
     test_max_record();
+    test_length_limits();
     test_exact_end();
     test_mixed_payloads();
     test_repeated_wraps();
