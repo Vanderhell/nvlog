@@ -1,7 +1,7 @@
 /**
  * nvlog — persistent record buffer for byte-writable and erase-before-write media.
  *
- * Public API version: 0.5.
+ * Public API version: 1.0.1.
  *
  * The implementation uses explicit little-endian wire encoding, committed
  * superblocks, committed DATA/WRAP/PADDING records, and wrap-aware recovery.
@@ -21,9 +21,9 @@ extern "C" {
 
 /* --- version --------------------------------------------------- */
 
-#define NVLOG_VERSION_MAJOR 0
-#define NVLOG_VERSION_MINOR 5
-#define NVLOG_VERSION_PATCH 0
+#define NVLOG_VERSION_MAJOR 1
+#define NVLOG_VERSION_MINOR 0
+#define NVLOG_VERSION_PATCH 1
 
 /* --- limits ---------------------------------------------------- */
 
