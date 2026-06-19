@@ -157,7 +157,7 @@ static void test_max_record(void)
     CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
     uint8_t payload[NVLOG_MAX_PAYLOAD];
     memset(payload, 0xA5, sizeof(payload));
-    CHECK(nvlog_append(&ctx, payload, (uint16_t)sizeof(payload)) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, payload, sizeof(payload)) == NVLOG_OK);
     assert_stats(&ctx, NVLOG_RECORD_OVERHEAD + NVLOG_MAX_PAYLOAD, ctx.free_bytes, 1, 1);
 
     close_ring(&pctx);
@@ -419,7 +419,7 @@ static void test_full_capacity(void)
     uint32_t before_count = st.record_count;
     uint32_t before_used = st.used_bytes;
     uint32_t before_free = st.free_bytes;
-    CHECK(nvlog_append(&ctx, payload, (uint16_t)sizeof(payload)) == NVLOG_ERR_FULL);
+    CHECK(nvlog_append(&ctx, payload, sizeof(payload)) == NVLOG_ERR_FULL);
     CHECK(nvlog_stats(&ctx, &st) == NVLOG_OK);
     CHECK(st.record_count == before_count);
     CHECK(st.used_bytes == before_used);

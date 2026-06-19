@@ -66,14 +66,14 @@ static void test_basic(void)
     CHECK(ctx.geometry_key == 0u);
 
     const char *msg = "hello nvlog";
-    CHECK(nvlog_append(&ctx, msg, (uint16_t)strlen(msg)) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, msg, strlen(msg)) == NVLOG_OK);
 
     nvlog_iter_t   it;
     nvlog_record_t rec;
     CHECK(nvlog_iter_init(&it, &ctx) == NVLOG_OK);
     CHECK(nvlog_iter_next(&it, &rec) == NVLOG_OK);
     CHECK(rec.seq == 0);
-    CHECK(rec.len == (uint16_t)strlen(msg));
+    CHECK((size_t)rec.len == strlen(msg));
 
     char buf[64] = {0};
     CHECK(nvlog_read_payload(&ctx, &rec, buf, sizeof(buf)) == NVLOG_OK);
@@ -100,7 +100,7 @@ static void test_multiple(void)
     for (int i = 0; i < 5; i++) {
         char buf[8];
         snprintf(buf, sizeof(buf), "rec%d", i);
-        CHECK(nvlog_append(&ctx, buf, (uint16_t)strlen(buf)) == NVLOG_OK);
+        CHECK(nvlog_append(&ctx, buf, strlen(buf)) == NVLOG_OK);
     }
 
     nvlog_iter_t   it;

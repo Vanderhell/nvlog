@@ -267,7 +267,7 @@ static void run_seed(uint32_t seed)
         } else if (op == 1u) {
             history_add(&hist, "%u: append len=%u", i, len);
             nvlog_posix_inject_fail_after(&pctx, (int32_t)(rng_step(&rng) % 3u));
-            nvlog_status_t st = nvlog_append(&ctx, payload, (uint16_t)len);
+            nvlog_status_t st = nvlog_append(&ctx, payload, len);
             nvlog_posix_inject_fail_after(&pctx, -1);
             if (st == NVLOG_OK)
                 shadow_append(&shadow, payload, len);
