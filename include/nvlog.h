@@ -55,11 +55,11 @@ extern "C" {
 #define NVLOG_REGION_MAGIC        NVLOG_MEDIA_MAGIC
 #define NVLOG_RECORD_MAGIC        0x4Eu
 #define NVLOG_RECORD_VERSION      0x05u
-#define NVLOG_HEADER_SIZE         20u
-#define NVLOG_SUPERBLOCK_SIZE     32u
+#define NVLOG_HEADER_SIZE         32u
+#define NVLOG_SUPERBLOCK_SIZE     64u
 #define NVLOG_SUPERBLOCK_COUNT    2u
 #define NVLOG_MEDIA_HEADER_SIZE   (NVLOG_SUPERBLOCK_SIZE * NVLOG_SUPERBLOCK_COUNT)
-#define NVLOG_RECORD_HEADER_SIZE  20u
+#define NVLOG_RECORD_HEADER_SIZE  32u
 #define NVLOG_RECORD_CRC_SIZE     4u
 #define NVLOG_RECORD_COMMIT_SIZE  1u
 #define NVLOG_RECORD_OVERHEAD     (NVLOG_RECORD_HEADER_SIZE + NVLOG_RECORD_CRC_SIZE + NVLOG_RECORD_COMMIT_SIZE)
@@ -161,6 +161,10 @@ typedef struct {
     uint32_t      tail_ptr;      /* oldest record offset (ring mode only) */
     uint8_t       ring_full;     /* 1 when ring has wrapped at least once */
     uint32_t      record_count;  /* valid records currently in ring (ring mode only) */
+    uint32_t      used_bytes;    /* ring: committed live bytes */
+    uint32_t      free_bytes;    /* ring: committed free bytes */
+    uint32_t      padding_bytes; /* ring: explicit padding / wrap bytes */
+    uint32_t      reserve_bytes; /* ring: physical reserve for atomic overwrite */
 } nvlog_ctx_t;
 
 /* --- record (returned by iterator) ---------------------------- */

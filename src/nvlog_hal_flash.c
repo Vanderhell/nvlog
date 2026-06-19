@@ -5,6 +5,15 @@
 #include "nvlog_hal_flash.h"
 #include <string.h>
 
+extern nvlog_status_t format_impl(nvlog_ctx_t *ctx,
+                                  const nvlog_hal_t *hal,
+                                  uint32_t region_size,
+                                  nvlog_mode_t mode,
+                                  uint8_t media_class,
+                                  uint8_t program_unit,
+                                  uint8_t erased_value,
+                                  uint32_t geometry_key);
+
 /* ─── nvlog_flash_format ─────────────────────────────────────── */
 
 nvlog_status_t nvlog_flash_format(nvlog_ctx_t             *ctx,
@@ -37,8 +46,12 @@ nvlog_status_t nvlog_flash_format(nvlog_ctx_t             *ctx,
             return NVLOG_ERR_IO;
     }
 
-    /* delegate to nvlog_format() using the embedded base HAL */
-    return nvlog_format(ctx, &flash->base, region_size);
+    return format_impl(ctx, &flash->base, region_size,
+                       NVLOG_MODE_LINEAR,
+                       NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE,
+                       (uint8_t)flash->prog_size,
+                       0xFFu,
+                       (flash->erase_size << 16) | (flash->prog_size & 0xFFFFu));
 }
 
 /* ─── nvlog_flash_verify_erased ──────────────────────────────── */
@@ -50,14 +63,24 @@ nvlog_status_t nvlog_flash_verify_erased(const nvlog_hal_flash_t *flash,
         return NVLOG_ERR_PARAM;
 
     uint8_t  buf[32];
-    uint32_t remaining = 0;
+    uint8_t  head[8];
+    uint32_t remaining = region_size;
     uint32_t offset    = 0;
 
-    if (region_size <= NVLOG_REGION_HEADER_SIZE)
-        return NVLOG_OK;
-
-    remaining = region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE;
-    offset    = (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    if (region_size >= sizeof(head) &&
+        flash->base.read(0, head, sizeof(head), flash->base.user) == 0) {
+        uint32_t magic = (uint32_t)head[0] |
+                         ((uint32_t)head[1] << 8) |
+                         ((uint32_t)head[2] << 16) |
+                         ((uint32_t)head[3] << 24);
+        uint16_t version = (uint16_t)head[4] | ((uint16_t)head[5] << 8);
+        if (magic == NVLOG_MEDIA_MAGIC && version == NVLOG_MEDIA_VERSION) {
+            offset = NVLOG_REGION_HEADER_SIZE;
+            if (offset > region_size)
+                return NVLOG_ERR_PARAM;
+            remaining = region_size - offset;
+        }
+    }
 
     while (remaining > 0) {
         uint32_t n = remaining < sizeof(buf) ? remaining : sizeof(buf);

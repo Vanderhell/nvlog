@@ -40,6 +40,7 @@ static int g_fail = 0;
 /* ─── helpers ─────────────────────────────────────────────────── */
 
 #define NVM_SIZE  1024u
+#define RING_SIZE ((uint32_t)(NVLOG_REGION_HEADER_SIZE + 2u * (NVLOG_RECORD_OVERHEAD + NVLOG_MAX_PAYLOAD) + 4096u))
 
 static void make_ctx(nvlog_ctx_t *ctx, nvlog_posix_ctx_t *pctx, nvlog_hal_t *hal)
 {
@@ -352,7 +353,7 @@ static void test_superblock_validation(void)
     CHECK(nvlog_ring_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_UNSUPPORTED);
 
     /* Reformat for ring and ensure linear mount rejects it. */
-    CHECK(nvlog_ring_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_ring_format(&ctx, &hal, RING_SIZE) == NVLOG_OK);
     CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_UNSUPPORTED);
 
     /* Explicit v0.4 rejection: corrupt both superblocks to version 0x04. */

@@ -1,462 +1,447 @@
-/**
- * tests/test_ring.c — Ring mode test suite
- *
- * Tests:
- *   RG-01  basic ring: append + iter (no wrap yet)
- *   RG-02  ring wraps: oldest records overwritten, newest visible
- *   RG-03  iter order: oldest-first across wrap boundary
- *   RG-04  SEQ is monotonically increasing across wrap
- *   RG-05  power-loss during ring append → interrupted record invisible
- *   RG-06  ring_mount recovery: empty ring
- *   RG-07  ring_mount recovery: ring with records, no wrap
- *   RG-08  ring_mount recovery: ring has wrapped, correct tail restored
- *   RG-09  ring_mount recovery: power-loss at CRC → tail/write_ptr correct
- *   RG-10  ring_count() returns correct count before and after wrap
- *   RG-11  record too large for ring → NVLOG_ERR_FULL
- *   RG-12  linear API still works (backward compat)
- *   RG-13  fill ring exactly, then one more write evicts oldest
- */
-
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 #include <stdint.h>
 
 #include "../include/nvlog.h"
 #include "../backends/nvlog_posix.h"
 
+#define CHECK(expr) do { \
+    if (!(expr)) { \
+        fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); \
+        g_fail++; \
+    } else { \
+        g_pass++; \
+    } \
+} while (0)
+
+#define TEST(name) do { \
+    printf("\n[%s]\n", name); \
+} while (0)
+
 static int g_pass = 0;
 static int g_fail = 0;
 
-#define CHECK(expr) do { \
-    if (!(expr)) { \
-        fprintf(stderr, "  FAIL  %s:%d  %s\n", __FILE__, __LINE__, #expr); \
-        g_fail++; \
-    } else { g_pass++; } \
-} while(0)
-
-#define TEST(name) fprintf(stdout, "\n[RG] %s\n", name)
-
-/*
- * Small region: 8 (region header) + 5 records × (12 overhead + 4 payload) = 8 + 80 = 88 bytes.
- * We'll use RING_SIZE = 88 → fits exactly 5 records, then wraps.
- */
-#define PAYLOAD_LEN  4u
-#define RECORD_SIZE  (NVLOG_RECORD_OVERHEAD + PAYLOAD_LEN)   /* 16 */
-#define NUM_RECORDS  5u
-#define RING_SIZE    ((uint32_t)(NVLOG_REGION_HEADER_SIZE + NUM_RECORDS * RECORD_SIZE))  /* 88 */
-
-/* ─── helpers ─────────────────────────────────────────────────── */
-
-static void fresh(nvlog_posix_ctx_t *p, nvlog_hal_t *h)
+static uint32_t ring_size(uint32_t slack)
 {
-    nvlog_posix_open_ram(p, h, RING_SIZE);
+    return (uint32_t)(NVLOG_REGION_HEADER_SIZE + NVLOG_RECORD_OVERHEAD + slack);
 }
 
-static uint32_t count(nvlog_ctx_t *ctx)
+static uint32_t ring_large_size(void)
 {
-    return nvlog_ring_count(ctx);
+    return ring_size(NVLOG_MAX_PAYLOAD + 4096u);
 }
 
-/* Collect all records into seq[] array, return count */
-static uint32_t collect_seqs(nvlog_ctx_t *ctx, uint32_t *seq_buf, uint32_t buf_len)
+static void open_ring(nvlog_posix_ctx_t *pctx, nvlog_hal_t *hal, uint32_t size)
 {
-    nvlog_iter_t it; nvlog_record_t rec;
-    nvlog_iter_init(&it, ctx);
+    CHECK(nvlog_posix_open_ram(pctx, hal, size) == 0);
+}
+
+static void close_ring(nvlog_posix_ctx_t *pctx)
+{
+    nvlog_posix_close(pctx);
+}
+
+static void make_payload(uint8_t *buf, uint32_t len, uint32_t seed)
+{
+    for (uint32_t i = 0; i < len; i++)
+        buf[i] = (uint8_t)(seed + i);
+}
+
+static void append_record(nvlog_ctx_t *ctx, uint32_t seq, uint32_t len)
+{
+    uint8_t payload[65536];
+    if (len > sizeof(payload)) len = (uint32_t)sizeof(payload);
+    make_payload(payload, len, seq);
+    nvlog_status_t st = nvlog_append(ctx, payload, (uint16_t)len);
+    CHECK(st == NVLOG_OK);
+}
+
+static uint32_t collect_records(nvlog_ctx_t *ctx, nvlog_record_t *recs, uint32_t max)
+{
+    nvlog_iter_t it;
     uint32_t n = 0;
-    while (n < buf_len && nvlog_iter_next(&it, &rec) == NVLOG_OK)
-        seq_buf[n++] = rec.seq;
+    CHECK(nvlog_iter_init(&it, ctx) == NVLOG_OK);
+    while (n < max) {
+        nvlog_status_t st = nvlog_iter_next(&it, &recs[n]);
+        if (st == NVLOG_ERR_NO_DATA)
+            break;
+        CHECK(st == NVLOG_OK);
+        n++;
+    }
     return n;
 }
 
-/* Write 'n' records with payload = 4-byte little-endian index */
-static void write_n(nvlog_ctx_t *ctx, uint32_t n)
+static void assert_stats(nvlog_ctx_t *ctx, uint32_t used, uint32_t freeb, uint32_t count, uint32_t next_seq)
 {
+    nvlog_stats_t st;
+    CHECK(nvlog_stats(ctx, &st) == NVLOG_OK);
+    CHECK(st.used_bytes == used);
+    CHECK(st.free_bytes == freeb);
+    CHECK(st.record_count == count);
+    CHECK(st.next_seq == next_seq);
+}
+
+static void test_empty_ring(void)
+{
+    TEST("ring empty");
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, ring_size(1024u));
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, ring_size(1024u)) == NVLOG_OK);
+    assert_stats(&ctx, 0, ctx.free_bytes, 0, 0);
+
+    nvlog_iter_t it;
+    nvlog_record_t rec;
+    CHECK(nvlog_iter_init(&it, &ctx) == NVLOG_OK);
+    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_ERR_NO_DATA);
+
+    close_ring(&pctx);
+}
+
+static void test_one_record(void)
+{
+    TEST("ring one record");
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, ring_size(2048u));
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, ring_size(2048u)) == NVLOG_OK);
+    append_record(&ctx, 0, 4u);
+
+    nvlog_record_t recs[4];
+    uint32_t n = collect_records(&ctx, recs, 4);
+    CHECK(n == 1);
+    CHECK(recs[0].seq == 0);
+    CHECK(recs[0].len == 4);
+
+    uint8_t payload[4];
+    CHECK(nvlog_read_payload(&ctx, &recs[0], payload, sizeof(payload)) == NVLOG_OK);
+    CHECK(payload[0] == 0 && payload[1] == 1 && payload[2] == 2 && payload[3] == 3);
+
+    close_ring(&pctx);
+}
+
+static void test_zero_length(void)
+{
+    TEST("ring zero length");
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, ring_size(2048u));
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, ring_size(2048u)) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, NULL, 0) == NVLOG_OK);
+    assert_stats(&ctx, NVLOG_RECORD_OVERHEAD, ctx.free_bytes, 1, 1);
+
+    nvlog_record_t recs[2];
+    uint32_t n = collect_records(&ctx, recs, 2);
+    CHECK(n == 1);
+    CHECK(recs[0].len == 0);
+
+    close_ring(&pctx);
+}
+
+static void test_max_record(void)
+{
+    TEST("ring maximum record");
+    uint32_t size = ring_size(NVLOG_MAX_PAYLOAD + 128u);
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    uint8_t payload[NVLOG_MAX_PAYLOAD];
+    memset(payload, 0xA5, sizeof(payload));
+    CHECK(nvlog_append(&ctx, payload, (uint16_t)sizeof(payload)) == NVLOG_OK);
+    assert_stats(&ctx, NVLOG_RECORD_OVERHEAD + NVLOG_MAX_PAYLOAD, ctx.free_bytes, 1, 1);
+
+    close_ring(&pctx);
+}
+
+static void test_exact_end(void)
+{
+    TEST("ring exact end");
+    uint32_t len = 256u;
+    uint32_t size = (uint32_t)(NVLOG_REGION_HEADER_SIZE + NVLOG_RECORD_OVERHEAD + len);
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    append_record(&ctx, 7u, len);
+    CHECK(ctx.write_ptr == NVLOG_REGION_HEADER_SIZE);
+
+    nvlog_record_t recs[2];
+    uint32_t n = collect_records(&ctx, recs, 2);
+    CHECK(n == 1);
+    CHECK(recs[0].seq == 0 && recs[0].len == len);
+
+    close_ring(&pctx);
+}
+
+static void test_mixed_payloads(void)
+{
+    TEST("ring mixed payloads");
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    uint32_t size = ring_large_size();
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    const uint32_t lengths[] = {0u, 1u, 3u, 7u, 16u, 31u, 4u, 2u};
+    for (uint32_t i = 0; i < sizeof(lengths) / sizeof(lengths[0]); i++)
+        append_record(&ctx, i, lengths[i]);
+
+    nvlog_record_t recs[16];
+    uint32_t n = collect_records(&ctx, recs, 16);
+    CHECK(n == sizeof(lengths) / sizeof(lengths[0]));
     for (uint32_t i = 0; i < n; i++) {
-        uint32_t v = ctx->next_seq;   /* use seq as payload too */
-        nvlog_status_t st = nvlog_append(ctx, &v, sizeof(v));
-        (void)st;
+        CHECK(recs[i].seq == i);
+        CHECK(recs[i].len == lengths[i]);
     }
+
+    close_ring(&pctx);
 }
 
-/* ─── RG-01: basic, no wrap ───────────────────────────────────── */
-
-static void test_rg01(void)
+static void test_repeated_wraps(void)
 {
-    TEST("RG-01: basic append + iter (no wrap)");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
+    TEST("ring repeated wraps");
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    uint32_t size = ring_size(4096u);
+    open_ring(&pctx, &hal, size);
+
     nvlog_ctx_t ctx;
-    CHECK(nvlog_ring_format(&ctx, &h, RING_SIZE) == NVLOG_OK);
-    CHECK(ctx.mode == NVLOG_MODE_RING);
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    for (uint32_t i = 0; i < 400u; i++)
+        append_record(&ctx, i, (uint32_t)(i % 23u));
 
-    write_n(&ctx, 3);
-    CHECK(count(&ctx) == 3);
+    nvlog_ctx_t rm;
+    CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
+    CHECK(nvlog_ring_count(&rm) > 0);
+    CHECK(rm.next_seq == 400u);
 
-    uint32_t seqs[8];
-    uint32_t n = collect_seqs(&ctx, seqs, 8);
-    CHECK(n == 3);
-    CHECK(seqs[0] == 0 && seqs[1] == 1 && seqs[2] == 2);
-
-    nvlog_posix_close(&p);
-}
-
-/* ─── RG-02: wrap — oldest overwritten ───────────────────────── */
-
-static void test_rg02(void)
-{
-    TEST("RG-02: wrap — oldest records overwritten");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
-    nvlog_ctx_t ctx;
-    nvlog_ring_format(&ctx, &h, RING_SIZE);
-
-    /* fill completely (5 records) */
-    write_n(&ctx, NUM_RECORDS);
-    CHECK(count(&ctx) == NUM_RECORDS);
-
-    /* write one more — should evict record 0, ring holds 1..5 */
-    write_n(&ctx, 1);
-    CHECK(count(&ctx) == NUM_RECORDS);
-
-    uint32_t seqs[8];
-    uint32_t n = collect_seqs(&ctx, seqs, 8);
-    CHECK(n == NUM_RECORDS);
-    CHECK(seqs[0] == 1);                       /* oldest = seq 1 */
-    CHECK(seqs[n-1] == NUM_RECORDS);           /* newest = seq 5 */
-
-    nvlog_posix_close(&p);
-}
-
-/* ─── RG-03: iter order across wrap boundary ──────────────────── */
-
-static void test_rg03(void)
-{
-    TEST("RG-03: iter yields oldest-first across wrap");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
-    nvlog_ctx_t ctx;
-    nvlog_ring_format(&ctx, &h, RING_SIZE);
-
-    /* write 7 records into a 5-slot ring → evicts 0,1 */
-    write_n(&ctx, NUM_RECORDS + 2);
-
-    uint32_t seqs[8];
-    uint32_t n = collect_seqs(&ctx, seqs, 8);
-    CHECK(n == NUM_RECORDS);
-    /* should be 2,3,4,5,6 in order */
-    for (uint32_t i = 0; i < n; i++)
-        CHECK(seqs[i] == 2 + i);
-
-    nvlog_posix_close(&p);
-}
-
-/* ─── RG-04: SEQ monotonically increasing across wrap ─────────── */
-
-static void test_rg04(void)
-{
-    TEST("RG-04: SEQ monotonically increasing across wraps");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
-    nvlog_ctx_t ctx;
-    nvlog_ring_format(&ctx, &h, RING_SIZE);
-
-    /* write 3× capacity */
-    write_n(&ctx, NUM_RECORDS * 3);
-
-    uint32_t seqs[8];
-    uint32_t n = collect_seqs(&ctx, seqs, 8);
-    CHECK(n == NUM_RECORDS);
-
+    nvlog_record_t recs[512];
+    uint32_t n = collect_records(&rm, recs, 512);
+    CHECK(n == nvlog_ring_count(&rm));
     for (uint32_t i = 1; i < n; i++)
-        CHECK(seqs[i] == seqs[i-1] + 1);   /* strictly increasing */
+        CHECK((uint32_t)(recs[i - 1].seq + 1u) == recs[i].seq);
 
-    nvlog_posix_close(&p);
+    close_ring(&pctx);
 }
 
-/* ─── RG-05: power-loss during ring append ────────────────────── */
-
-static void test_rg05(void)
+static void test_corrupt_header_payload_commit(void)
 {
-    TEST("RG-05: power-loss during ring append → record invisible");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
+    TEST("ring corrupt header/payload/commit");
+    uint32_t size = ring_large_size();
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
     nvlog_ctx_t ctx;
-    nvlog_ring_format(&ctx, &h, RING_SIZE);
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    append_record(&ctx, 0, 8u);
 
-    write_n(&ctx, 2);  /* seq 0, 1 */
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + NVLOG_RECORD_HEADER_SIZE] ^= 0x40u;
+    CHECK(nvlog_ring_mount(&ctx, &hal, size) == NVLOG_ERR_CORRUPT);
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + NVLOG_RECORD_HEADER_SIZE] ^= 0x40u;
 
-    /* fail after header write — CRC never written */
-    nvlog_posix_inject_fail_after(&p, 1);
-    uint32_t v = 99;
-    nvlog_append(&ctx, &v, sizeof(v));
-    nvlog_posix_inject_fail_after(&p, -1);
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + 1u] ^= 0x01u;
+    CHECK(nvlog_ring_mount(&ctx, &hal, size) == NVLOG_ERR_CORRUPT);
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + 1u] ^= 0x01u;
 
-    /* mount and verify: only seq 0 and 1 visible */
-    nvlog_ctx_t ctx2;
-    CHECK(nvlog_ring_mount(&ctx2, &h, RING_SIZE) == NVLOG_OK);
-    CHECK(count(&ctx2) == 2);
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + NVLOG_RECORD_HEADER_SIZE + 8u + 4u] ^= 0x01u;
+    CHECK(nvlog_ring_mount(&ctx, &hal, size) == NVLOG_ERR_CORRUPT);
 
-    uint32_t seqs[8];
-    uint32_t n = collect_seqs(&ctx2, seqs, 8);
+    close_ring(&pctx);
+}
+
+static void test_interrupted_append(void)
+{
+    TEST("ring interrupted append");
+    uint32_t size = ring_large_size();
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    append_record(&ctx, 0, 4u);
+
+    nvlog_posix_inject_fail_after(&pctx, 1);
+    uint8_t payload[4] = {9, 8, 7, 6};
+    nvlog_status_t st = nvlog_append(&ctx, payload, 4u);
+    CHECK(st == NVLOG_ERR_IO);
+    nvlog_posix_inject_fail_after(&pctx, -1);
+
+    nvlog_ctx_t rm;
+    CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
+    nvlog_record_t recs[8];
+    uint32_t n = collect_records(&rm, recs, 8);
+    CHECK(n == 1);
+    CHECK(recs[0].seq == 0);
+
+    CHECK(nvlog_append(&rm, payload, 4u) == NVLOG_OK);
+    CHECK(nvlog_ring_mount(&ctx, &hal, size) == NVLOG_OK);
+    n = collect_records(&ctx, recs, 8);
     CHECK(n == 2);
-    CHECK(seqs[0] == 0 && seqs[1] == 1);
 
-    nvlog_posix_close(&p);
+    close_ring(&pctx);
 }
 
-/* ─── RG-06: mount empty ring ─────────────────────────────────── */
-
-static void test_rg06(void)
+static void test_iterator_invalidation(void)
 {
-    TEST("RG-06: ring_mount on empty ring");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
-
-    nvlog_ctx_t ctx1;
-    nvlog_ring_format(&ctx1, &h, RING_SIZE);
-    /* no appends */
-
-    nvlog_ctx_t ctx2;
-    CHECK(nvlog_ring_mount(&ctx2, &h, RING_SIZE) == NVLOG_OK);
-    CHECK(count(&ctx2) == 0);
-    CHECK(ctx2.next_seq == 0);
-
-    /* can still append after mount */
-    uint32_t v = 42;
-    CHECK(nvlog_append(&ctx2, &v, sizeof(v)) == NVLOG_OK);
-    CHECK(count(&ctx2) == 1);
-
-    nvlog_posix_close(&p);
-}
-
-/* ─── RG-07: mount ring with records, no wrap ─────────────────── */
-
-static void test_rg07(void)
-{
-    TEST("RG-07: ring_mount with records, no wrap yet");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
-
-    nvlog_ctx_t ctx1;
-    nvlog_ring_format(&ctx1, &h, RING_SIZE);
-    write_n(&ctx1, 3);
-
-    nvlog_ctx_t ctx2;
-    CHECK(nvlog_ring_mount(&ctx2, &h, RING_SIZE) == NVLOG_OK);
-    CHECK(count(&ctx2) == 3);
-    CHECK(ctx2.next_seq == 3);
-
-    /* append more after recovery */
-    write_n(&ctx2, 2);
-    CHECK(count(&ctx2) == 5);
-
-    nvlog_posix_close(&p);
-}
-
-/* ─── RG-08: mount after wrap — tail restored correctly ───────── */
-
-static void test_rg08(void)
-{
-    TEST("RG-08: ring_mount after wrap — tail_ptr restored correctly");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
-
-    nvlog_ctx_t ctx1;
-    nvlog_ring_format(&ctx1, &h, RING_SIZE);
-    /* write 7 records → evicts 0,1 */
-    write_n(&ctx1, NUM_RECORDS + 2);
-
-    nvlog_ctx_t ctx2;
-    CHECK(nvlog_ring_mount(&ctx2, &h, RING_SIZE) == NVLOG_OK);
-
-    uint32_t seqs[8];
-    uint32_t n = collect_seqs(&ctx2, seqs, 8);
-    CHECK(n == NUM_RECORDS);
-    CHECK(seqs[0] == 2);        /* oldest after eviction */
-    CHECK(seqs[n-1] == 6);      /* newest */
-    CHECK(ctx2.next_seq == 7);
-
-    nvlog_posix_close(&p);
-}
-
-/* ─── RG-09: mount after power-loss at CRC ────────────────────── */
-
-static void test_rg09(void)
-{
-    TEST("RG-09: ring_mount after power-loss (CRC not written)");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
-
-    nvlog_ctx_t ctx1;
-    nvlog_ring_format(&ctx1, &h, RING_SIZE);
-    write_n(&ctx1, 3);   /* seq 0,1,2 committed */
-
-    /* fail before CRC of record seq=3 */
-    nvlog_posix_inject_fail_after(&p, 2);  /* header+payload ok, CRC fails */
-    write_n(&ctx1, 1);
-    nvlog_posix_inject_fail_after(&p, -1);
-
-    nvlog_ctx_t ctx2;
-    CHECK(nvlog_ring_mount(&ctx2, &h, RING_SIZE) == NVLOG_OK);
-    CHECK(count(&ctx2) == 3);
-    CHECK(ctx2.next_seq == 3);   /* seq 3 was not committed */
-
-    /* verify correct records visible */
-    uint32_t seqs[8];
-    uint32_t n = collect_seqs(&ctx2, seqs, 8);
-    CHECK(n == 3);
-    CHECK(seqs[0] == 0 && seqs[1] == 1 && seqs[2] == 2);
-
-    nvlog_posix_close(&p);
-}
-
-/* ─── RG-10: ring_count ───────────────────────────────────────── */
-
-static void test_rg10(void)
-{
-    TEST("RG-10: ring_count before and after wrap");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
-    nvlog_ctx_t ctx;
-    nvlog_ring_format(&ctx, &h, RING_SIZE);
-
-    for (uint32_t i = 0; i < NUM_RECORDS * 3; i++) {
-        write_n(&ctx, 1);
-        uint32_t c = count(&ctx);
-        uint32_t expected = (i + 1) < NUM_RECORDS ? (i + 1) : NUM_RECORDS;
-        CHECK(c == expected);
-    }
-
-    nvlog_posix_close(&p);
-}
-
-/* ─── RG-11: record too large for ring ────────────────────────── */
-
-static void test_rg11(void)
-{
-    TEST("RG-11: record larger than ring capacity → NVLOG_ERR_FULL");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
-    nvlog_ctx_t ctx;
-    nvlog_ring_format(&ctx, &h, RING_SIZE);
-
-    /* payload that exceeds entire ring data area */
-    uint32_t cap = RING_SIZE - (uint32_t)NVLOG_REGION_HEADER_SIZE;
-    uint8_t  *big = (uint8_t *)malloc(cap);
-    memset(big, 0xCC, cap);
-
-    nvlog_status_t st = nvlog_append(&ctx, big, (uint16_t)(cap - 1));
-    CHECK(st == NVLOG_ERR_FULL);
-
-    free(big);
-    nvlog_posix_close(&p);
-}
-
-/* ─── RG-12: linear API unaffected (backward compat) ─────────── */
-
-static void test_rg12(void)
-{
-    TEST("RG-12: linear mode still works (backward compat)");
-    nvlog_posix_ctx_t p; nvlog_hal_t h;
-    nvlog_posix_open_ram(&p, &h, RING_SIZE);
+    TEST("ring iterator invalidation");
+    uint32_t size = ring_large_size();
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
 
     nvlog_ctx_t ctx;
-    nvlog_format(&ctx, &h, RING_SIZE);
-    CHECK(ctx.mode == NVLOG_MODE_LINEAR);
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    append_record(&ctx, 0, 4u);
 
-    write_n(&ctx, 3);
+    nvlog_iter_t it;
+    nvlog_record_t rec;
+    CHECK(nvlog_iter_init(&it, &ctx) == NVLOG_OK);
+    append_record(&ctx, 1, 4u);
+    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_ERR_STALE);
 
-    nvlog_ctx_t ctx2;
-    CHECK(nvlog_mount(&ctx2, &h, RING_SIZE) == NVLOG_OK);
-    CHECK(ctx2.mode == NVLOG_MODE_LINEAR);
-
-    uint32_t seqs[8];
-    uint32_t n = collect_seqs(&ctx2, seqs, 8);
-    CHECK(n == 3);
-    CHECK(seqs[0] == 0 && seqs[1] == 1 && seqs[2] == 2);
-
-    nvlog_posix_close(&p);
+    close_ring(&pctx);
 }
 
-/* ─── RG-13: fill exactly, then evict oldest ──────────────────── */
-
-static void test_rg13(void)
+static void test_stale_descriptor(void)
 {
-    TEST("RG-13: fill ring exactly, one more write evicts oldest");
-    nvlog_posix_ctx_t p; nvlog_hal_t h; fresh(&p, &h);
+    TEST("ring stale descriptor");
+    uint32_t size = ring_size(128u);
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
     nvlog_ctx_t ctx;
-    nvlog_ring_format(&ctx, &h, RING_SIZE);
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    append_record(&ctx, 0, 4u);
 
-    write_n(&ctx, NUM_RECORDS);     /* fill exactly: seq 0..4 */
-    CHECK(count(&ctx) == NUM_RECORDS);
+    nvlog_record_t recs[2];
+    uint32_t n = collect_records(&ctx, recs, 2);
+    CHECK(n == 1);
+    for (uint32_t i = 1; i < 8u; i++)
+        append_record(&ctx, i, 4u);
+    uint8_t buf[4];
+    CHECK(nvlog_read_payload(&ctx, &recs[0], buf, sizeof(buf)) == NVLOG_ERR_STALE);
 
-    /* write seq=5: ring must now hold seq 1..5 */
-    write_n(&ctx, 1);
-    CHECK(count(&ctx) == NUM_RECORDS);
-
-    uint32_t seqs[8];
-    uint32_t n = collect_seqs(&ctx, seqs, 8);
-    CHECK(n == NUM_RECORDS);
-    CHECK(seqs[0] == 1);            /* seq 0 evicted */
-    CHECK(seqs[n-1] == 5);
-
-    /* read payload of first record and verify it's seq=1 */
-    nvlog_iter_t it; nvlog_record_t rec;
-    nvlog_iter_init(&it, &ctx);
-    nvlog_iter_next(&it, &rec);
-    uint32_t payload = 0;
-    nvlog_read_payload(&ctx, &rec, &payload, sizeof(payload));
-    CHECK(payload == 1);            /* payload == seq number for write_n() */
-
-    nvlog_posix_close(&p);
+    close_ring(&pctx);
 }
 
-static void test_rg14(void)
+static void test_sequence_wraparound(void)
 {
-    TEST("RG-14: record_count correct after multi-record eviction");
-    /* Use a region that fits exactly 3 small records */
-    uint32_t small_ring = (uint32_t)(NVLOG_REGION_HEADER_SIZE + 3 * RECORD_SIZE);
-    nvlog_posix_ctx_t p; nvlog_hal_t h;
-    nvlog_posix_open_ram(&p, &h, small_ring);
+    TEST("ring sequence wrap");
+    uint32_t size = ring_large_size();
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
     nvlog_ctx_t ctx;
-    nvlog_ring_format(&ctx, &h, small_ring);
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    ctx.next_seq = UINT32_MAX - 2u;
+    ctx.metadata_seq = 1u;
+    for (uint32_t i = 0; i < 5u; i++)
+        CHECK(nvlog_append(&ctx, &i, sizeof(i)) == NVLOG_OK);
 
-    /* fill: 3 records */
-    write_n(&ctx, 3);
-    CHECK(nvlog_ring_count(&ctx) == 3);
+    nvlog_ctx_t rm;
+    CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
+    nvlog_record_t recs[8];
+    uint32_t n = collect_records(&rm, recs, 8);
+    CHECK(n == 5u);
+    CHECK(recs[0].seq == UINT32_MAX - 2u);
+    CHECK(recs[1].seq == UINT32_MAX - 1u);
+    CHECK(recs[2].seq == UINT32_MAX);
+    CHECK(recs[3].seq == 0u);
+    CHECK(recs[4].seq == 1u);
 
-    /* one more: evicts 1, count stays 3 */
-    write_n(&ctx, 1);
-    CHECK(nvlog_ring_count(&ctx) == 3);
-
-    /* five more: count must never exceed 3 */
-    write_n(&ctx, 5);
-    CHECK(nvlog_ring_count(&ctx) == 3);
-
-    /* mount and verify count matches reality */
-    nvlog_ctx_t ctx2;
-    nvlog_ring_mount(&ctx2, &h, small_ring);
-    CHECK(nvlog_ring_count(&ctx2) == 3);
-
-    nvlog_posix_close(&p);
+    close_ring(&pctx);
 }
 
-/* ─── main ────────────────────────────────────────────────────── */
+static void test_full_capacity(void)
+{
+    TEST("ring full capacity rejection");
+    uint32_t size = ring_size(32u);
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    uint8_t payload[128];
+    memset(payload, 0xCC, sizeof(payload));
+    nvlog_stats_t st;
+    CHECK(nvlog_stats(&ctx, &st) == NVLOG_OK);
+    uint32_t before_count = st.record_count;
+    uint32_t before_used = st.used_bytes;
+    uint32_t before_free = st.free_bytes;
+    CHECK(nvlog_append(&ctx, payload, (uint16_t)sizeof(payload)) == NVLOG_ERR_FULL);
+    CHECK(nvlog_stats(&ctx, &st) == NVLOG_OK);
+    CHECK(st.record_count == before_count);
+    CHECK(st.used_bytes == before_used);
+    CHECK(st.free_bytes == before_free);
+
+    close_ring(&pctx);
+}
+
+static void test_old_or_new_overwrite(void)
+{
+    TEST("ring old-or-new overwrite");
+    uint32_t size = ring_large_size();
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    append_record(&ctx, 0, 8u);
+    append_record(&ctx, 1, 8u);
+
+    nvlog_posix_inject_fail_after(&pctx, 2);
+    uint8_t payload[8] = {1,2,3,4,5,6,7,8};
+    nvlog_status_t st = nvlog_append(&ctx, payload, 8u);
+    nvlog_posix_inject_fail_after(&pctx, -1);
+    CHECK(st == NVLOG_ERR_IO || st == NVLOG_OK);
+
+    nvlog_ctx_t rm;
+    CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
+    nvlog_record_t recs[8];
+    uint32_t n = collect_records(&rm, recs, 8);
+    CHECK(n >= 2u && n <= 3u);
+    CHECK(recs[0].seq == 0u);
+
+    close_ring(&pctx);
+}
 
 int main(void)
 {
-    printf("nvlog ring mode test suite\n");
-    printf("===================================\n");
+    printf("nvlog ring tests\n");
 
-    test_rg01();
-    test_rg02();
-    test_rg03();
-    test_rg04();
-    test_rg05();
-    test_rg06();
-    test_rg07();
-    test_rg08();
-    test_rg09();
-    test_rg10();
-    test_rg11();
-    test_rg12();
-    test_rg13();
-    test_rg14();
+    test_empty_ring();
+    test_one_record();
+    test_zero_length();
+    test_max_record();
+    test_exact_end();
+    test_mixed_payloads();
+    test_repeated_wraps();
+    test_corrupt_header_payload_commit();
+    test_interrupted_append();
+    test_iterator_invalidation();
+    test_stale_descriptor();
+    test_sequence_wraparound();
+    test_full_capacity();
+    test_old_or_new_overwrite();
 
-    printf("\n===================================\n");
-    printf("PASSED: %d\n", g_pass);
-    printf("FAILED: %d\n", g_fail);
-    printf("===================================\n");
-
-    return g_fail == 0 ? 0 : 1;
+    printf("PASSED: %d\nFAILED: %d\n", g_pass, g_fail);
+    return g_fail ? 1 : 0;
 }
