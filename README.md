@@ -55,6 +55,7 @@ The repository is in active repair. Public claims about power-loss guarantees, f
 - POSIX backend: host-tested
 - Flash simulator: simulator-tested
 - Flash format helper: host-tested
+- Flash program-unit geometry: host-tested
 - FRAM example backend: compile-verified
 - EEPROM example backend: compile-verified
 - SPI NOR example backend: compile-verified
