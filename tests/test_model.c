@@ -173,14 +173,6 @@ static void shadow_append(shadow_state_t *s, const uint8_t *payload, uint32_t le
     shadow_recalculate(s);
 }
 
-static uint32_t shadow_collect(const shadow_state_t *s, shadow_record_t *out, uint32_t max)
-{
-    uint32_t n = (uint32_t)((s->count < max) ? s->count : max);
-    for (uint32_t i = 0; i < n; i++)
-        out[i] = s->recs[i];
-    return n;
-}
-
 static void compare_records(const history_t *h, const shadow_state_t *exp, const shadow_record_t *act, uint32_t n)
 {
     CHECK(n == exp->count);

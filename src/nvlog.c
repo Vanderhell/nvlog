@@ -727,47 +727,6 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     return NVLOG_OK;
 }
 
-/* --- ring: tail advancement ----------------------------------- */
-
-/**
- * Advance tail_ptr past any record that overlaps [write_at, write_at+total).
- * Returns the number of records evicted.
- *
- * Overlap condition (only valid when ring_full=1):
- *   tail_ptr falls within the range the new record will overwrite.
- *
- * After normalization, write_ptr is always < region_size.
- * The new record always fits within [write_at, write_at+total) <= region_size
- * because nvlog_append already ensured the wrap.
- */
-static uint32_t ring_advance_tail(nvlog_ctx_t *ctx,
-                                  uint32_t write_at, uint32_t total)
-{
-    uint32_t write_end = write_at + total;
-    uint32_t evicted = 0;
-
-    while (ctx->tail_ptr >= write_at && ctx->tail_ptr < write_end) {
-        nvlog_rec_hdr_t hdr;
-        uint32_t        rec_total;
-
-        if (verify_record(ctx, ctx->tail_ptr, &hdr, &rec_total) != 0)
-            rec_total = (uint32_t)NVLOG_RECORD_OVERHEAD; /* skip minimum */
-
-        ctx->tail_ptr += rec_total;
-
-        if (ctx->tail_ptr >= ctx->region_size)
-            ctx->tail_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
-
-        evicted++;
-
-        /* safety: if tail wrapped past write_at, no more overlap possible */
-        if (ctx->tail_ptr < write_at)
-            break;
-    }
-
-    return evicted;
-}
-
 /* --- nvlog_append --------------------------------------------- */
 
 nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
@@ -787,8 +746,6 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
         uint32_t base = ctx->write_ptr;
         uint32_t new_tail = ctx->tail_ptr;
         uint32_t retired = 0;
-        uint32_t retired_data_bytes = 0;
-        uint32_t retired_padding_bytes = 0;
         uint32_t occupied_live = 0;
 
         if (capacity == 0 || usable == 0) return NVLOG_ERR_FULL;
@@ -815,10 +772,6 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
                 retired += rec_total;
                 if (hdr.type == NVLOG_RECORD_TYPE_DATA) {
                     evicted++;
-                    retired_data_bytes += rec_total;
-                } else if (hdr.type == NVLOG_RECORD_TYPE_WRAP ||
-                           hdr.type == NVLOG_RECORD_TYPE_PADDING) {
-                    retired_padding_bytes += rec_total;
                 }
                 cursor += rec_total;
                 if (cursor >= ctx->region_size)
