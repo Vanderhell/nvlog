@@ -782,5 +782,9 @@ int main(void)
 
     nvlog_posix_close(&pctx);
     printf("PASSED: %d\nFAILED: %d\n", g_pass, g_fail);
+    printf("sizeof(nvlog_ctx_t)=%zu\n", sizeof(nvlog_ctx_t));
+    printf("sizeof(nvlog_iter_t)=%zu\n", sizeof(nvlog_iter_t));
+    printf("sizeof(nvlog_record_t)=%zu\n", sizeof(nvlog_record_t));
+    printf("sizeof(nvlog_hal_t)=%zu\n", sizeof(nvlog_hal_t));
     return g_fail == 0 ? 0 : 1;
 }
