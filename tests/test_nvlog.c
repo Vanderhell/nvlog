@@ -59,6 +59,10 @@ static void test_basic(void)
     make_ctx(&ctx, &pctx, &hal);
 
     CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(ctx.media_class == NVLOG_MEDIA_CLASS_BYTE_WRITABLE);
+    CHECK(ctx.program_unit == 1u);
+    CHECK(ctx.erased_value == 0xFFu);
+    CHECK(ctx.geometry_key == 0u);
 
     const char *msg = "hello nvlog";
     CHECK(nvlog_append(&ctx, msg, (uint16_t)strlen(msg)) == NVLOG_OK);
