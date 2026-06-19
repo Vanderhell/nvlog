@@ -297,6 +297,53 @@ static void test_fl10(void)
     nvlog_flash_sim_close(&sim);
 }
 
+/* â”€â”€â”€ FL-11: supported program-unit sizes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+static void test_fl11(void)
+{
+    TEST("FL-11: supported program-unit sizes");
+
+    const uint32_t units[] = {1u, 4u, 8u, 32u};
+    for (size_t i = 0; i < sizeof(units) / sizeof(units[0]); i++) {
+        nvlog_flash_sim_ctx_t sim;
+        nvlog_hal_flash_t flash;
+        nvlog_flash_sim_cfg_t cfg = {0};
+        cfg.capacity = REGION_SIZE;
+        cfg.erased_value = 0xFFu;
+        cfg.erase_unit = SECTOR_SIZE;
+        cfg.program_unit = units[i];
+        cfg.program_alignment = units[i];
+        cfg.max_transfer = 0u;
+        cfg.sector_size = SECTOR_SIZE;
+        CHECK(nvlog_flash_sim_open_cfg(&sim, &flash, &cfg) == 0);
+
+        nvlog_ctx_t ctx;
+        CHECK(nvlog_flash_format(&ctx, &flash, REGION_SIZE) == NVLOG_OK);
+        CHECK(ctx.media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE);
+        CHECK(ctx.program_unit == (uint8_t)units[i]);
+        CHECK(ctx.erased_value == 0xFFu);
+        CHECK(ctx.geometry_key == ((SECTOR_SIZE << 16) | units[i]));
+        CHECK(nvlog_flash_verify_erased(&flash, REGION_SIZE) == NVLOG_OK);
+
+        nvlog_flash_sim_close(&sim);
+    }
+
+    nvlog_flash_sim_ctx_t sim;
+    nvlog_hal_flash_t flash;
+    nvlog_flash_sim_cfg_t cfg = {0};
+    cfg.capacity = REGION_SIZE;
+    cfg.erased_value = 0xFFu;
+    cfg.erase_unit = SECTOR_SIZE;
+    cfg.program_unit = 2u;
+    cfg.program_alignment = 2u;
+    cfg.max_transfer = 0u;
+    cfg.sector_size = SECTOR_SIZE;
+    CHECK(nvlog_flash_sim_open_cfg(&sim, &flash, &cfg) == 0);
+    nvlog_ctx_t ctx;
+    CHECK(nvlog_flash_format(&ctx, &flash, REGION_SIZE) == NVLOG_ERR_PARAM);
+    nvlog_flash_sim_close(&sim);
+}
+
 /* ─── main ────────────────────────────────────────────────────── */
 
 int main(void)
@@ -314,6 +361,7 @@ int main(void)
     test_fl08();
     test_fl09();
     test_fl10();
+    test_fl11();
 
     printf("\n=======================================\n");
     printf("PASSED: %d\n", g_pass);

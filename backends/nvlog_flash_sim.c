@@ -21,6 +21,7 @@ static int sim_write(uint32_t addr, const void *buf, uint32_t len, void *user)
     if (addr > s->size || len > s->size - addr) return -1;
     if (s->program_size == 0 || s->program_alignment == 0) return -1;
     if (addr % s->program_alignment != 0) return -1;
+    if (s->max_transfer != 0u && len > s->max_transfer) return -1;
 
     if (len == 0) return 0;
     if (len % s->program_size != 0) return -1;
@@ -62,6 +63,7 @@ static int sim_erase(uint32_t addr, uint32_t len, void *user)
     if (addr % s->sector_size != 0) return -1;
     if (len % s->sector_size != 0) return -1;
     if (addr > s->size || len > s->size - addr) return -1;
+    if (s->max_transfer != 0u && len > s->max_transfer) return -1;
 
     if (s->fail_after_erase >= 0) {
         if (s->erase_count_global >= (uint32_t)s->fail_after_erase)
@@ -93,6 +95,7 @@ static int flash_sim_open_cfg_inner(nvlog_flash_sim_ctx_t *sim,
     if (!sim || !flash_out || !cfg) return -1;
     if (cfg->capacity == 0 || cfg->sector_size == 0) return -1;
     if (cfg->program_unit == 0 || cfg->program_alignment == 0) return -1;
+    if (cfg->erase_unit != 0u && cfg->erase_unit != cfg->sector_size) return -1;
     if (cfg->capacity % cfg->sector_size != 0) return -1;
     if (cfg->capacity / cfg->sector_size > 256u) return -1;
     if (cfg->sector_size % cfg->program_unit != 0) return -1;
@@ -103,7 +106,7 @@ static int flash_sim_open_cfg_inner(nvlog_flash_sim_ctx_t *sim,
     if (!sim->mem) return -1;
 
     sim->size = cfg->capacity;
-    sim->sector_size = cfg->sector_size;
+    sim->sector_size = cfg->erase_unit != 0u ? cfg->erase_unit : cfg->sector_size;
     sim->program_size = cfg->program_unit;
     sim->program_alignment = cfg->program_alignment;
     sim->max_transfer = cfg->max_transfer;
@@ -120,7 +123,7 @@ static int flash_sim_open_cfg_inner(nvlog_flash_sim_ctx_t *sim,
     flash_out->base.write = sim_write;
     flash_out->base.user = sim;
     flash_out->erase = sim_erase;
-    flash_out->erase_size = cfg->sector_size;
+    flash_out->erase_size = sim->sector_size;
     flash_out->prog_size = cfg->program_unit;
     flash_out->user = sim;
     return 0;
