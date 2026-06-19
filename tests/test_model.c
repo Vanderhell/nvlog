@@ -6,6 +6,8 @@
 
 #include "../include/nvlog.h"
 #include "../backends/nvlog_posix.h"
+#include "../backends/nvlog_flash_sim.h"
+#include "../include/nvlog_hal_flash.h"
 
 #define MODEL_SIZE 4096u
 #define MAX_MODEL_RECORDS 256u
@@ -786,5 +788,8 @@ int main(void)
     printf("sizeof(nvlog_iter_t)=%zu\n", sizeof(nvlog_iter_t));
     printf("sizeof(nvlog_record_t)=%zu\n", sizeof(nvlog_record_t));
     printf("sizeof(nvlog_hal_t)=%zu\n", sizeof(nvlog_hal_t));
+    printf("sizeof(nvlog_hal_flash_t)=%zu\n", sizeof(nvlog_hal_flash_t));
+    printf("sizeof(nvlog_posix_ctx_t)=%zu\n", sizeof(nvlog_posix_ctx_t));
+    printf("sizeof(nvlog_flash_sim_ctx_t)=%zu\n", sizeof(nvlog_flash_sim_ctx_t));
     return g_fail == 0 ? 0 : 1;
 }
