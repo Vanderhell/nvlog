@@ -8,6 +8,7 @@ Current repository baseline:
 - linear and ring APIs in the public header
 - POSIX RAM/file backend for host tests
 - NOR flash simulator for host tests
+- flash-format helper that preserves geometry metadata in `nvlog_ctx_t`
 - compile-only example backend sources under `backends/hal_examples/`
 - public-header compile checks for C and C++
 
@@ -15,7 +16,7 @@ The tree currently verifies the host test suites on Windows with CTest. It does 
 
 ## Verified baseline
 
-- 7 CTest suites in the current tree
+- 8 CTest suites in the current tree
 - host Release and Debug builds with MSVC on Windows
 - strict warning-as-error Release and Debug builds with MSVC
 - host POSIX and flash-simulator test execution
@@ -53,6 +54,7 @@ The repository is in active repair. Public claims about power-loss guarantees, f
 - Core host tests: host-tested
 - POSIX backend: host-tested
 - Flash simulator: simulator-tested
+- Flash format helper: host-tested
 - FRAM example backend: compile-verified
 - EEPROM example backend: compile-verified
 - SPI NOR example backend: compile-verified

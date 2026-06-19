@@ -2,6 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#ifdef _WIN32
+#include <io.h>
+#include <stdio.h>
+#else
+#include <unistd.h>
+#endif
 
 /* ─── HAL callbacks ───────────────────────────────────────────── */
 
@@ -42,7 +48,12 @@ static int posix_write(uint32_t addr, const void *buf, uint32_t len, void *user)
 
     if (fseek(p->fp, (long)addr, SEEK_SET) != 0) return -1;
     if (fwrite(buf, 1, len, p->fp) != len)        return -1;
+#ifdef _WIN32
+    if (_commit(_fileno(p->fp)) != 0) return -1;
+#else
     if (fflush(p->fp) != 0) return -1;
+    if (fsync(fileno(p->fp)) != 0) return -1;
+#endif
     return 0;
 }
 
@@ -80,6 +91,21 @@ int nvlog_posix_open_file(nvlog_posix_ctx_t *pctx,
         for (uint32_t i = 0; i < size; i++)
             fwrite(&fill, 1, 1, fp);
         fflush(fp);
+        rewind(fp);
+    } else {
+        if (fseek(fp, 0, SEEK_END) != 0) {
+            fclose(fp);
+            return -1;
+        }
+        long file_len = ftell(fp);
+        if (file_len < 0) {
+            fclose(fp);
+            return -1;
+        }
+        if ((uint32_t)file_len != size) {
+            fclose(fp);
+            return -1;
+        }
         rewind(fp);
     }
     pctx->fp = fp;

@@ -64,6 +64,10 @@ static void test_fl01(void)
 
     nvlog_ctx_t ctx;
     CHECK(nvlog_flash_format(&ctx, &flash, REGION_SIZE) == NVLOG_OK);
+    CHECK(ctx.media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE);
+    CHECK(ctx.program_unit == 1u);
+    CHECK(ctx.erased_value == 0xFFu);
+    CHECK(ctx.geometry_key == ((SECTOR_SIZE << 16) | 1u));
 
     /* first 64 bytes = redundant A/B superblock pair */
     uint8_t sb0[NVLOG_SUPERBLOCK_SIZE];

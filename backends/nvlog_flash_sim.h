@@ -26,6 +26,10 @@ typedef struct {
     uint8_t  *mem;
     uint32_t  size;
     uint32_t  sector_size;
+    uint32_t  program_size;
+    uint32_t  program_alignment;
+    uint32_t  max_transfer;
+    uint8_t   erased_value;
 
     /* physics violation tracking */
     uint32_t  bit_flip_violations; /* write 0→1 without erase */
@@ -37,9 +41,21 @@ typedef struct {
     /* power-loss injection */
     int32_t   fail_after_write;   /* -1 = disabled */
     uint32_t  write_count;
+    int32_t   fail_during_write;  /* -1 = disabled, otherwise partial byte count */
     int32_t   fail_after_erase;   /* -1 = disabled */
     uint32_t  erase_count_global;
+    int32_t   fail_during_erase;  /* -1 = disabled, otherwise partial byte count */
 } nvlog_flash_sim_ctx_t;
+
+typedef struct {
+    uint32_t capacity;
+    uint8_t  erased_value;
+    uint32_t erase_unit;
+    uint32_t program_unit;
+    uint32_t program_alignment;
+    uint32_t max_transfer;
+    uint32_t sector_size;
+} nvlog_flash_sim_cfg_t;
 
 /**
  * Open RAM-backed NOR flash simulator.
@@ -49,6 +65,10 @@ int nvlog_flash_sim_open(nvlog_flash_sim_ctx_t *sim,
                           nvlog_hal_flash_t     *flash_out,
                           uint32_t               size,
                           uint32_t               sector_size);
+
+int nvlog_flash_sim_open_cfg(nvlog_flash_sim_ctx_t *sim,
+                             nvlog_hal_flash_t     *flash_out,
+                             const nvlog_flash_sim_cfg_t *cfg);
 
 /** Inject failure: writes fail after n write calls (-1 = disable) */
 void nvlog_flash_sim_inject_write_fail(nvlog_flash_sim_ctx_t *sim, int32_t n);

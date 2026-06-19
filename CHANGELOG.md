@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserved flash geometry metadata through `nvlog_format()` and `nvlog_mount()` so the flash helper's public fields remain live after initialization.
+- Added flash-geometry assertions to the host flash backend test.
 - Removed stale README status claims that overstated verification.
 - Normalized public version/status text in headers and test banners.
 - Fixed the currently reported compiler warnings in the host build.

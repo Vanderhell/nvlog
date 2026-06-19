@@ -44,6 +44,28 @@ static inline int nvlog_u32_sub_checked(uint32_t a, uint32_t b, uint32_t *out)
     return 1;
 }
 
+static inline int nvlog_u32_mul_checked(uint32_t a, uint32_t b, uint32_t *out)
+{
+    if (!out) return 0;
+    if (a != 0u && UINT32_MAX / a < b) return 0;
+    *out = a * b;
+    return 1;
+}
+
+static inline int nvlog_u32_align_up_checked(uint32_t value, uint32_t align, uint32_t *out)
+{
+    uint32_t rem = 0;
+    if (!out || align == 0u) return 0;
+    rem = value % align;
+    if (rem == 0u) {
+        *out = value;
+        return 1;
+    }
+    if (UINT32_MAX - value < (align - rem)) return 0;
+    *out = value + (align - rem);
+    return 1;
+}
+
 static inline uint32_t nvlog_crc32_step(uint32_t crc, uint8_t byte)
 {
     crc ^= byte;

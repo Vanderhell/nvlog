@@ -318,6 +318,10 @@ nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
     if (region_size <= NVLOG_REGION_HEADER_SIZE + NVLOG_RECORD_OVERHEAD)
         return NVLOG_ERR_PARAM;
 
+    uint32_t geometry_key = ctx->geometry_key;
+    uint8_t media_class = ctx->media_class;
+    uint8_t program_unit = ctx->program_unit;
+    uint8_t erased_value = ctx->erased_value;
     nvlog_ctx_t probe;
     memset(&probe, 0, sizeof(probe));
     probe.hal = *hal;
@@ -341,6 +345,10 @@ nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
     ctx->generation  = generation;
     ctx->metadata_seq = metadata_seq;
     ctx->mutation    = 1;
+    ctx->geometry_key = geometry_key;
+    ctx->media_class = media_class;
+    ctx->program_unit = program_unit ? program_unit : 1u;
+    ctx->erased_value = erased_value ? erased_value : 0xFFu;
 
     nvlog_superblock_t sb = {
         .magic = NVLOG_MEDIA_MAGIC,
@@ -369,6 +377,10 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     if (!ctx || !hal || !hal->read || !hal->write)
         return NVLOG_ERR_PARAM;
 
+    uint32_t geometry_key = ctx->geometry_key;
+    uint8_t media_class = ctx->media_class;
+    uint8_t program_unit = ctx->program_unit;
+    uint8_t erased_value = ctx->erased_value;
     memset(ctx, 0, sizeof(*ctx));
     ctx->hal         = *hal;
     ctx->region_size = region_size;
@@ -376,6 +388,10 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     ctx->tail_ptr    = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     ctx->mode        = NVLOG_MODE_LINEAR;
     ctx->mutation    = 1;
+    ctx->geometry_key = geometry_key;
+    ctx->media_class = media_class;
+    ctx->program_unit = program_unit ? program_unit : 1u;
+    ctx->erased_value = erased_value ? erased_value : 0xFFu;
 
     nvlog_superblock_t sb;
     if (load_current_superblock(ctx, &sb) != 0) return NVLOG_ERR_CORRUPT;
@@ -730,6 +746,10 @@ nvlog_status_t nvlog_ring_format(nvlog_ctx_t *ctx,
     if (region_size < (uint32_t)NVLOG_REGION_HEADER_SIZE + 2u * NVLOG_RECORD_OVERHEAD + 2u)
         return NVLOG_ERR_PARAM;
 
+    uint32_t geometry_key = ctx->geometry_key;
+    uint8_t media_class = ctx->media_class;
+    uint8_t program_unit = ctx->program_unit;
+    uint8_t erased_value = ctx->erased_value;
     nvlog_ctx_t probe;
     memset(&probe, 0, sizeof(probe));
     probe.hal = *hal;
@@ -753,6 +773,10 @@ nvlog_status_t nvlog_ring_format(nvlog_ctx_t *ctx,
     ctx->generation  = generation;
     ctx->metadata_seq = metadata_seq;
     ctx->mutation    = 1;
+    ctx->geometry_key = geometry_key;
+    ctx->media_class = media_class;
+    ctx->program_unit = program_unit ? program_unit : 1u;
+    ctx->erased_value = erased_value ? erased_value : 0xFFu;
 
     nvlog_superblock_t sb = {
         .magic = NVLOG_MEDIA_MAGIC,
@@ -779,10 +803,18 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
 {
     if (!ctx || !hal || !hal->read || !hal->write) return NVLOG_ERR_PARAM;
 
+    uint32_t geometry_key = ctx->geometry_key;
+    uint8_t media_class = ctx->media_class;
+    uint8_t program_unit = ctx->program_unit;
+    uint8_t erased_value = ctx->erased_value;
     memset(ctx, 0, sizeof(*ctx));
     ctx->hal         = *hal;
     ctx->region_size = region_size;
     ctx->mode        = NVLOG_MODE_RING;
+    ctx->geometry_key = geometry_key;
+    ctx->media_class = media_class;
+    ctx->program_unit = program_unit ? program_unit : 1u;
+    ctx->erased_value = erased_value ? erased_value : 0xFFu;
 
     nvlog_superblock_t sb;
     if (load_current_superblock(ctx, &sb) != 0) return NVLOG_ERR_CORRUPT;

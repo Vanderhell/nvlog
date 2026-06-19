@@ -68,8 +68,15 @@ extern "C" {
 
 typedef enum {
     NVLOG_RECORD_TYPE_DATA      = 0x01u,
-    NVLOG_RECORD_TYPE_WRAP_PAD   = 0x02u,
+    NVLOG_RECORD_TYPE_WRAP      = 0x02u,
+    NVLOG_RECORD_TYPE_PADDING   = 0x03u,
+    NVLOG_RECORD_TYPE_WRAP_PAD  = 0x02u,
 } nvlog_record_type_t;
+
+typedef enum {
+    NVLOG_MEDIA_CLASS_BYTE_WRITABLE = 0u,
+    NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE = 1u,
+} nvlog_media_class_t;
 
 #define NVLOG_FLAGS_LINEAR        0x00u
 #define NVLOG_FLAGS_RING          0x01u
@@ -143,6 +150,10 @@ typedef struct {
     uint32_t      mutation;      /* increments on mount/format/append */
     uint32_t      generation;    /* active media generation */
     uint32_t      metadata_seq;   /* superblock publication counter */
+    uint32_t      geometry_key;   /* packed erase/program geometry identity */
+    uint8_t       media_class;    /* NVLOG_MEDIA_CLASS_* */
+    uint8_t       program_unit;   /* physical program unit in bytes */
+    uint8_t       erased_value;    /* erased byte value, typically 0xFF */
     uint8_t       mounted;       /* 1 after successful nvlog_mount() */
 
     /* ring mode fields */

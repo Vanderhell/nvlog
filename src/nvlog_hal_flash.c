@@ -17,8 +17,19 @@ nvlog_status_t nvlog_flash_format(nvlog_ctx_t             *ctx,
     if (flash->user && flash->base.user && flash->user != flash->base.user)
         return NVLOG_ERR_PARAM;
     if (flash->erase_size == 0)                return NVLOG_ERR_PARAM;
+    if (flash->prog_size == 0)                 return NVLOG_ERR_PARAM;
+    if (flash->prog_size != 1u &&
+        flash->prog_size != 4u &&
+        flash->prog_size != 8u &&
+        flash->prog_size != 32u)
+        return NVLOG_ERR_PARAM;
     if (region_size % flash->erase_size != 0)  return NVLOG_ERR_PARAM;
     if (region_size < flash->erase_size)       return NVLOG_ERR_PARAM;
+
+    ctx->media_class = NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE;
+    ctx->program_unit = (uint8_t)flash->prog_size;
+    ctx->erased_value = 0xFFu;
+    ctx->geometry_key = (flash->erase_size << 16) | (flash->prog_size & 0xFFFFu);
 
     /* erase entire region sector by sector */
     for (uint32_t off = 0; off < region_size; off += flash->erase_size) {
