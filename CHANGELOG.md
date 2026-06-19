@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Updated the public append API to accept `size_t` lengths so `NVLOG_ERR_TOO_LARGE` is reachable before narrowing.
+- Added ring tests for `UINT16_MAX`, `UINT32_MAX`, and `SIZE_MAX`-adjacent length validation.
+- Removed the stale `NVLOG_RECORD_TYPE_WRAP_PAD` alias from the public record-type enum.
+- Rewrote the v0.5 media-format document to match the current encoded superblock and record layout.
 - Preserved flash geometry metadata through `nvlog_format()` and `nvlog_mount()` so the flash helper's public fields remain live after initialization.
 - Added flash-geometry assertions to the host flash backend test.
 - Added host coverage for flash program-unit geometry values 1, 4, 8, and 32.

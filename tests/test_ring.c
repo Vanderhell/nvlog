@@ -53,7 +53,7 @@ static void append_record(nvlog_ctx_t *ctx, uint32_t seq, uint32_t len)
     uint8_t payload[65536];
     if (len > sizeof(payload)) len = (uint32_t)sizeof(payload);
     make_payload(payload, len, seq);
-    nvlog_status_t st = nvlog_append(ctx, payload, (uint16_t)len);
+    nvlog_status_t st = nvlog_append(ctx, payload, len);
     CHECK(st == NVLOG_OK);
 }
 

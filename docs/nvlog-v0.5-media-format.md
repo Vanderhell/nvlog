@@ -1,71 +1,153 @@
-# nvlog media-format baseline
+# nvlog v0.5 media format
 
-This document describes the on-media layout currently implemented in this
-repository. It is intentionally explicit about the parts that are verified
-here and avoids claiming a completed flash-random-access redesign that is not
-yet present.
+This document describes the currently implemented v0.5 media encoding in this repository.
+
+## Scope
+
+- Public API version: `0.5`
+- Supported media classes:
+  - byte-writable media
+  - erase-before-write media
+- Supported logical modes:
+  - linear
+  - ring
+
+Physical STM32 and ESP32 execution are not verified.
 
 ## Byte order
 
-All multibyte integer fields are encoded in little-endian order.
+All multibyte integer fields are encoded little-endian.
 
-## Region metadata
+## Region layout
 
-The first 64 bytes of the region are a redundant A/B superblock pair.
+The first 128 bytes of a formatted region contain two independent 64-byte superblock copies:
 
-| Offset | Size | Field | Description |
-|---|---:|---|---|
-| 0x00 | 4 | magic | `NVLG` |
-| 0x04 | 2 | format_version | `0x0005` |
-| 0x06 | 1 | mode | `0x00` linear, `0x01` ring |
-| 0x07 | 1 | reserved0 | Must be zero |
-| 0x08 | 4 | region_size | Configured region size in bytes |
-| 0x0C | 4 | generation | Session identifier selected by format |
-| 0x10 | 4 | metadata_seq | Publication counter for metadata writes |
-| 0x14 | 4 | feature_flags | Must be zero |
-| 0x18 | 4 | crc32 | CRC32 of bytes `0x00..0x17` |
-| 0x20 | 32 | copy B | Second copy with the same structure |
+- copy A at offset `0x0000`
+- copy B at offset `0x0040`
+
+The media payload begins at offset `0x0080`.
+
+## Superblock encoding
+
+Each superblock is 64 bytes and uses explicit fixed-width fields:
+
+| Offset | Size | Field |
+|---|---:|---|
+| 0x00 | 4 | `magic` |
+| 0x04 | 2 | `format_version` |
+| 0x06 | 1 | `mode` |
+| 0x07 | 1 | `media_class` |
+| 0x08 | 4 | `region_size` |
+| 0x0C | 4 | `generation` |
+| 0x10 | 4 | `metadata_seq` |
+| 0x14 | 4 | `write_ptr` |
+| 0x18 | 4 | `tail_ptr` |
+| 0x1C | 4 | `next_seq` |
+| 0x20 | 4 | `record_count` |
+| 0x24 | 4 | `used_bytes` |
+| 0x28 | 4 | `free_bytes` |
+| 0x2C | 4 | `padding_bytes` |
+| 0x30 | 4 | `reserve_bytes` |
+| 0x34 | 4 | `feature_flags` |
+| 0x38 | 4 | `reserved0` |
+| 0x3C | 4 | `crc32` |
 
 Validation rules:
 
-- Both copies are validated independently.
-- If both copies are valid, the newer generation is selected.
-- Reserved fields must be zero.
-- Mode and region size must match the mounted API call.
+- `magic` must equal `NVLOG_MEDIA_MAGIC`
+- `format_version` must equal `NVLOG_MEDIA_VERSION`
+- `mode` must be supported
+- `media_class` must match the mounted media contract
+- `reserved0` must be zero
+- `feature_flags` must be zero
+- `crc32` must match the CRC of bytes `0x00..0x37`
+- if both copies are valid, the newer generation and metadata sequence are selected using wrap-aware ordering
 
-## Record layout
+## Record encoding
 
-The current implementation still uses the existing byte-writable record
-encoding:
+Each record uses a 32-byte header, followed by payload bytes, followed by a 4-byte payload CRC, followed by a 1-byte final commit state.
 
-- 8-byte logical record header
-- variable payload
-- 4-byte record CRC written last
-- 24-byte reserved allocation unit per appended record
+### Record header
 
-The logical header fields are:
+| Offset | Size | Field |
+|---|---:|---|
+| 0x00 | 1 | `magic` |
+| 0x01 | 1 | `type` |
+| 0x02 | 1 | `version` |
+| 0x03 | 1 | `flags` |
+| 0x04 | 1 | `mode` |
+| 0x05 | 3 | `reserved` |
+| 0x08 | 4 | `generation` |
+| 0x0C | 4 | `seq` |
+| 0x10 | 4 | `payload_len` |
+| 0x14 | 4 | `total_len` |
+| 0x18 | 4 | `alloc_len` |
+| 0x1C | 4 | `crc32` |
 
-| Offset | Size | Field | Description |
-|---|---:|---|---|
-| 0x00 | 1 | magic | Record anchor byte |
-| 0x01 | 1 | flags | Mode flag |
-| 0x02 | 2 | len | Payload length |
-| 0x04 | 4 | seq | Sequence number |
+Supported record types:
 
-The CRC is computed over the logical header and payload and is written last.
+- `DATA`
+- `WRAP`
+- `PADDING`
 
-## Implementation notes
+Validation rules:
 
-- `nvlog_format()` and `nvlog_ring_format()` publish a new metadata
-  generation through the redundant superblock pair.
-- `nvlog_iter_next()` rejects stale iterators.
-- `nvlog_read_payload()` revalidates the record descriptor before copying.
-- Flash example backends are compile-verified, not hardware-verified.
+- `magic` must equal `NVLOG_RECORD_MAGIC`
+- `version` must equal `NVLOG_RECORD_VERSION`
+- `type` must be one of the supported types
+- `flags` must be one of the supported flags
+- `mode` must be supported
+- `reserved` bytes must be zero
+- `generation` must match the mounted generation
+- `payload_len`, `total_len`, and `alloc_len` must be internally consistent
+- header CRC must match the encoded header bytes
 
-## Limitations
+## Final commit state
 
-- Physical STM32 and ESP32 execution are not verified.
-- The current tree does not yet implement the full A/B recovery and flash-ring
-  redesign described in `exec.docx`.
-- The current tree should be treated as a work-in-progress implementation with
-  honest verification boundaries.
+The record commit state is a separate 1-byte field written after the payload CRC.
+
+- `0x00` means committed
+- `0xFF` means not committed / erased
+
+The implementation validates the final commit byte before exposing a record.
+
+## Recovery contract
+
+The implementation distinguishes:
+
+- clean erased end
+- incomplete uncommitted record
+- corrupt committed record
+- unsupported record or format
+- mode mismatch
+- generation mismatch
+- bounds violation
+- backend read/write failure
+- stale iterator or stale descriptor
+
+Ring mode recovery restores:
+
+- head
+- tail
+- write position
+- live record count
+- live payload bytes
+- padding bytes
+- reserve bytes
+- free bytes
+- next sequence
+
+## Verification status
+
+Verified in this repository:
+
+- host-tested: POSIX host model, ring tests, randomized model
+- simulator-tested: flash simulator
+- compile-verified: FRAM, EEPROM, SPI NOR, STM32F4, STM32L4, STM32H7, ESP-IDF partition adapter
+- hardware-verified: not verified
+
+## Notes
+
+- This repository does not claim generic hardware verification.
+- Physical STM32 and ESP32 execution remain not verified.
+- The document should be read together with the test evidence and build evidence in the repository.

@@ -1,35 +1,12 @@
 /**
- * nvlog — Tiny persistent record buffer for MCUs
+ * nvlog — persistent record buffer for byte-writable and erase-before-write media.
  *
- * Supports two modes:
+ * Public API version: 0.5.
  *
- *   LINEAR: append-only, stops when full.
- *   RING:   circular, overwrites oldest records when full.
- *
- * Memory layout:
- *
- *   LINEAR:  [REGION_HEADER][RECORD_0][RECORD_1]...[RECORD_N][free...]
- *   RING:    [REGION_HEADER][...records wrap around the region...]
- *
- * Record layout (both modes):
- *
- *   [MAGIC:1][FLAGS:1][LEN:2][SEQ:4][PAYLOAD:N][CRC32:4][COMMIT:1]
- *
- *   MAGIC   - 0x4E ('N'), fast scan anchor
- *   FLAGS   - mode: 0x00=linear, 0x01=ring
- *   LEN     - payload length (uint16)
- *   SEQ     - monotonic, local to this format() call; resets on nvlog_format/ring_format
- *   PAYLOAD - user data
- *   CRC32   - over MAGIC+FLAGS+LEN+SEQ+PAYLOAD (written before COMMIT)
- *   COMMIT  - final byte written last; 0xA5 means committed
- *
- * Ring mode recovery (2-pass, O(n) scan, no heap):
- *   Pass 1: scan all records → find max SEQ → derive write_ptr
- *   Pass 2: scan forward from write_ptr (wrapping) → find tail_ptr
- *
- * Power-loss guarantee (both modes):
- *   CRC is written last. Interrupted records have no CRC → invisible
- *   on next mount. Previously committed records are always intact.
+ * The implementation uses explicit little-endian wire encoding, committed
+ * superblocks, committed DATA/WRAP/PADDING records, and wrap-aware recovery.
+ * Power-loss behavior is backend- and media-specific; do not assume generic
+ * flash safety from the core API alone.
  */
 
 #ifndef NVLOG_H
@@ -70,7 +47,6 @@ typedef enum {
     NVLOG_RECORD_TYPE_DATA      = 0x01u,
     NVLOG_RECORD_TYPE_WRAP      = 0x02u,
     NVLOG_RECORD_TYPE_PADDING   = 0x03u,
-    NVLOG_RECORD_TYPE_WRAP_PAD  = 0x02u,
 } nvlog_record_type_t;
 
 typedef enum {
@@ -286,26 +262,18 @@ nvlog_status_t nvlog_ring_format(nvlog_ctx_t       *ctx,
 /**
  * nvlog_ring_mount() — recover a ring-mode region after reset.
  *
- * Two-pass recovery:
- *   Pass 1: scan all valid records → find highest SEQ → derive write_ptr.
- *   Pass 2: scan forward from write_ptr (wrapping) → find tail_ptr.
+ * Restores the latest committed ring state, including head/tail/write
+ * positions, live counts, and next sequence.
  *
- * If region header is missing/corrupt: returns NVLOG_ERR_CORRUPT.
- * If region contains zero valid records: returns NVLOG_OK with empty ring.
- *
- * Note: SEQ numbers are local to the current format session.
- * After nvlog_ring_format(), SEQ starts at 0 and increments forever.
- * After nvlog_ring_mount(), SEQ continues from the last committed record.
- * SEQ is NOT globally unique across format() calls.
+ * Returns NVLOG_ERR_CORRUPT for a corrupt committed ring image.
+ * Returns NVLOG_ERR_UNSUPPORTED for a mismatched version or mode.
  */
 nvlog_status_t nvlog_ring_mount(nvlog_ctx_t       *ctx,
-                                 const nvlog_hal_t *hal,
-                                 uint32_t           region_size);
+                                  const nvlog_hal_t *hal,
+                                  uint32_t           region_size);
 
 /**
  * nvlog_ring_count() — number of valid records currently in the ring.
- *
- * O(n) scan. For large rings, cache this value in your application.
  */
 uint32_t nvlog_ring_count(nvlog_ctx_t *ctx);
 
