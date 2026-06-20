@@ -156,10 +156,11 @@ typedef struct {
 } nvlog_ctx_t;
 
 /**
- * nvlog_ctx_init() - zero a caller-owned context before use.
+ * nvlog_ctx_init() - zero a caller-owned context before first use.
  *
- * This is optional, but it makes the initialization contract explicit.
- * The library assigns session_id on successful format/mount.
+ * Call this before the first nvlog_mount() on a fresh caller-owned context.
+ * nvlog_format() initializes the context itself, so an already formatted
+ * context does not need a separate init step before append/iter use.
  */
 void nvlog_ctx_init(nvlog_ctx_t *ctx);
 
@@ -207,7 +208,7 @@ nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
  *
  * Read-only recovery scan: finds the last valid record, restores write pointer
  * and sequence number, and refreshes the in-memory session identity.
- * Must be called before append/iter.
+ * Call nvlog_ctx_init() before the first mount on a fresh context.
  *
  * On first boot with fresh NVM: call nvlog_format() first.
  * On any subsequent boot: call nvlog_mount().
@@ -249,6 +250,7 @@ nvlog_status_t nvlog_iter_next(nvlog_iter_t *it, nvlog_record_t *out);
  *
  * buf must be at least record->len bytes.
  * Typically called right after nvlog_iter_next().
+ * The record is a snapshot for the current mounted context.
  */
 nvlog_status_t nvlog_read_payload(nvlog_ctx_t *ctx,
                                    const nvlog_record_t *record,

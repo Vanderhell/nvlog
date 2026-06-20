@@ -172,6 +172,7 @@ static void test_pl05(void)
 
     /* verify content */
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
     nvlog_mount(&ctx2, &hal, NVM_SIZE);
     nvlog_iter_t it; nvlog_record_t rec;
     nvlog_iter_init(&it, &ctx2);
@@ -211,6 +212,7 @@ static void test_pl06(void)
 
     nvlog_posix_inject_fail_after(&pctx, -1);
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
     nvlog_mount(&ctx2, &hal, NVM_SIZE);
 
     CHECK(count_records(&ctx2) == 1);
@@ -244,6 +246,7 @@ static void test_pl07(void)
 
     /* session 2: mount + append */
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
     nvlog_mount(&ctx2, &hal, NVM_SIZE);
     CHECK(ctx2.next_seq == 2);  /* seq 0 and 1 committed, 2 was interrupted */
 

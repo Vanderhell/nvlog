@@ -764,7 +764,7 @@ static int write_record_wire(nvlog_ctx_t *ctx,
                 }
             }
         }
-        if (hal_write(ctx, crc_off, &payload_crc, sizeof(payload_crc)) != 0)
+        if (hal_write(ctx, crc_off, crc_raw, sizeof(crc_raw)) != 0)
             return NVLOG_ERR_IO;
         commit = 0x00u;
         if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0)

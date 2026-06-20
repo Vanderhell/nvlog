@@ -184,6 +184,7 @@ static void test_mount_recovery(void)
 
     /* second session: mount */
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
     CHECK(nvlog_mount(&ctx2, &hal, NVM_SIZE) == NVLOG_OK);
     CHECK(ctx2.next_seq == 3);
 
@@ -269,6 +270,7 @@ static void test_power_loss(void)
     nvlog_posix_inject_fail_after(&pctx, -1);
 
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
     CHECK(nvlog_mount(&ctx2, &hal, NVM_SIZE) == NVLOG_OK);
 
     /* only "before" should be visible */

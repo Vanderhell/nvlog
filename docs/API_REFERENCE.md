@@ -4,7 +4,8 @@
 
 Zeroes a caller-owned context before first use.
 
-Use it before `nvlog_format()` or `nvlog_mount()` if you want an explicit initialization step.
+Use it before the first `nvlog_mount()` on a fresh context. `nvlog_format()`
+initializes the context itself.
 
 ## `nvlog_format()`
 
@@ -22,6 +23,8 @@ Mounts an existing linear region and restores the write pointer.
 
 Mount is read-only. Successful remounts refresh the in-memory session identity
 so old iterators and record snapshots become stale.
+
+Call `nvlog_ctx_init()` before mounting into a fresh caller-owned context.
 
 Returns `NVLOG_ERR_INCOMPLETE` only internally during recovery scanning; the
 public API returns the mapped status.
@@ -59,6 +62,9 @@ Requires:
 - matching session id
 - matching generation
 - matching record metadata
+
+The descriptor is a snapshot for the current mounted context and should not be
+treated as a durable handle across independent remounts.
 
 ## `nvlog_stats()`
 
