@@ -350,11 +350,11 @@ static void test_superblock_validation(void)
     CHECK(nvlog_append(&ctx, "one", 3) == NVLOG_OK);
 
     /* Ring mount against linear media must reject the mode mismatch. */
-    CHECK(nvlog_ring_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_UNSUPPORTED);
+    CHECK(nvlog_ring_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_MODE_MISMATCH);
 
     /* Reformat for ring and ensure linear mount rejects it. */
     CHECK(nvlog_ring_format(&ctx, &hal, RING_SIZE) == NVLOG_OK);
-    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_UNSUPPORTED);
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_MODE_MISMATCH);
 
     /* Explicit v0.4 rejection: corrupt both superblocks to version 0x04. */
     CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);

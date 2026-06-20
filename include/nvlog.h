@@ -78,6 +78,16 @@ typedef enum {
     NVLOG_ERR_STALE       = -8,  /* iterator or descriptor snapshot invalid */
     NVLOG_ERR_BOUNDS      = -9,  /* checked arithmetic or range validation failed */
     NVLOG_ERR_UNSUPPORTED = -10, /* unsupported mode/version/media combination */
+    NVLOG_ERR_END         = -11, /* clean erased end of log */
+    NVLOG_ERR_INCOMPLETE  = -12, /* incomplete tail record */
+    NVLOG_ERR_VERSION     = -13, /* unsupported record or media version */
+    NVLOG_ERR_TYPE        = -14, /* unsupported record type */
+    NVLOG_ERR_FLAGS       = -15, /* unsupported record flags */
+    NVLOG_ERR_RESERVED    = -16, /* non-zero reserved fields */
+    NVLOG_ERR_MODE_MISMATCH = -17, /* record mode does not match mount mode */
+    NVLOG_ERR_GENERATION_MISMATCH = -18, /* record generation does not match mount generation */
+    NVLOG_ERR_SIZE_MISMATCH = -19, /* record length fields disagree */
+    NVLOG_ERR_MEDIA_MISMATCH = -20, /* record media/state disagrees with mount */
 } nvlog_status_t;
 
 /* --- HAL — byte-writable backends only ------------------------ */
@@ -127,6 +137,7 @@ typedef struct {
     uint32_t      generation;    /* active media generation */
     uint32_t      metadata_seq;   /* superblock publication counter */
     uint32_t      geometry_key;   /* packed erase/program geometry identity */
+    uint32_t      session_id;     /* incremented on each successful mount/format */
     uint8_t       media_class;    /* NVLOG_MEDIA_CLASS_* */
     uint8_t       program_unit;   /* physical program unit in bytes */
     uint8_t       erased_value;    /* erased byte value, typically 0xFF */
@@ -149,6 +160,9 @@ typedef struct {
     uint32_t  seq;          /* sequence number */
     uint16_t  len;          /* payload length */
     uint32_t  offset;       /* NVM offset of this record (for debugging) */
+    uint32_t  generation;   /* media generation observed at iteration time */
+    uint32_t  session_id;   /* mount/session identity observed at iteration time */
+    uint32_t  crc32;        /* payload CRC32 */
     /* payload is NOT copied here — use nvlog_read_payload() */
 } nvlog_record_t;
 
@@ -163,6 +177,7 @@ typedef struct {
     uint8_t       wrapped;     /* 1 after cursor has wrapped around */
     uint32_t      snapshot_mutation; /* ctx mutation observed at init */
     uint32_t      snapshot_generation;
+    uint32_t      snapshot_session_id;
 } nvlog_iter_t;
 
 /* --- API ------------------------------------------------------- */
