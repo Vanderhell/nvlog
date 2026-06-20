@@ -16,6 +16,11 @@ static int posix_read(uint32_t addr, void *buf, uint32_t len, void *user)
     nvlog_posix_ctx_t *p = (nvlog_posix_ctx_t *)user;
     if (!p || !buf) return -1;
     if (addr > p->size || len > p->size - addr) return -1;
+    if (p->read_fail_after >= 0) {
+        if (p->read_count >= (uint32_t)p->read_fail_after)
+            return -1;
+        p->read_count++;
+    }
     if (!len) return 0;
 
     if (p->ram) {
@@ -68,6 +73,7 @@ int nvlog_posix_open_file(nvlog_posix_ctx_t *pctx,
 
     memset(pctx, 0, sizeof(*pctx));
     pctx->fail_after = -1;
+    pctx->read_fail_after = -1;
     pctx->size       = size;
 
     /* open or create */
@@ -124,6 +130,7 @@ int nvlog_posix_open_ram(nvlog_posix_ctx_t *pctx,
 
     memset(pctx, 0, sizeof(*pctx));
     pctx->fail_after = -1;
+    pctx->read_fail_after = -1;
     pctx->size       = size;
     pctx->ram        = (uint8_t *)calloc(1, size);
     if (!pctx->ram) return -1;
@@ -144,6 +151,13 @@ void nvlog_posix_inject_fail_after(nvlog_posix_ctx_t *pctx, int32_t n)
     if (!pctx) return;
     pctx->fail_after  = n;
     pctx->write_count = 0;
+}
+
+void nvlog_posix_inject_read_fail_after(nvlog_posix_ctx_t *pctx, int32_t n)
+{
+    if (!pctx) return;
+    pctx->read_fail_after = n;
+    pctx->read_count = 0;
 }
 
 /* ─── close ───────────────────────────────────────────────────── */

@@ -365,6 +365,91 @@ static void test_superblock_validation(void)
     nvlog_posix_close(&pctx);
 }
 
+static void test_read_failures_and_large_buffers(void)
+{
+    TEST("read failures and large payload buffers");
+
+    nvlog_ctx_t       ctx;
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t       hal;
+    make_ctx(&ctx, &pctx, &hal);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "payload", 7) == NVLOG_OK);
+
+    nvlog_posix_inject_read_fail_after(&pctx, 0);
+    nvlog_ctx_t mount_ctx;
+    CHECK(nvlog_mount(&mount_ctx, &hal, NVM_SIZE) == NVLOG_ERR_IO);
+    nvlog_posix_inject_read_fail_after(&pctx, -1);
+
+    CHECK(nvlog_mount(&mount_ctx, &hal, NVM_SIZE) == NVLOG_OK);
+
+    nvlog_iter_t it;
+    nvlog_record_t rec;
+    CHECK(nvlog_iter_init(&it, &mount_ctx) == NVLOG_OK);
+
+    nvlog_posix_inject_read_fail_after(&pctx, 0);
+    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_ERR_IO);
+    nvlog_posix_inject_read_fail_after(&pctx, -1);
+
+    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_OK);
+    char *buf = (char *)malloc((size_t)UINT16_MAX + 32u);
+    CHECK(buf != NULL);
+    if (buf) {
+        CHECK(nvlog_read_payload(&mount_ctx, &rec, buf, (size_t)UINT16_MAX + 1u) == NVLOG_OK);
+        CHECK(memcmp(buf, "payload", 7) == 0);
+        free(buf);
+    }
+
+    nvlog_posix_inject_read_fail_after(&pctx, 0);
+    CHECK(nvlog_read_payload(&mount_ctx, &rec, (char[8]){0}, sizeof((char[8]){0})) == NVLOG_ERR_IO);
+    nvlog_posix_inject_read_fail_after(&pctx, -1);
+
+    nvlog_posix_close(&pctx);
+}
+
+static void test_record_statuses(void)
+{
+    TEST("record and mount verification statuses");
+
+    nvlog_ctx_t       ctx;
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t       hal;
+    make_ctx(&ctx, &pctx, &hal);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "one", 3) == NVLOG_OK);
+
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE - 1u) == NVLOG_ERR_SIZE_MISMATCH);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "one", 3) == NVLOG_OK);
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + 1u] = 0x7Fu;
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_TYPE);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "one", 3) == NVLOG_OK);
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + 3u] = 0x7Fu;
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_FLAGS);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "one", 3) == NVLOG_OK);
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + 5u] = 0x01u;
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_RESERVED);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "one", 3) == NVLOG_OK);
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + 8u] ^= 0x01u;
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_GENERATION_MISMATCH);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "one", 3) == NVLOG_OK);
+    pctx.ram[NVLOG_REGION_HEADER_SIZE + NVLOG_HEADER_SIZE + 1u] ^= 0x01u;
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_ERR_CORRUPT);
+
+    nvlog_posix_close(&pctx);
+}
+
 /* ─── main ────────────────────────────────────────────────────── */
 
 int main(void)
@@ -382,6 +467,8 @@ int main(void)
     test_zero_payload();
     test_mount_unformatted();
     test_superblock_validation();
+    test_read_failures_and_large_buffers();
+    test_record_statuses();
 
     printf("\n=====================\n");
     printf("PASSED: %d\n", g_pass);

@@ -25,6 +25,8 @@ typedef struct {
     uint32_t size;
     int32_t  fail_after;   /* -1 = no inject; >=0 = fail after N writes */
     uint32_t write_count;
+    int32_t  read_fail_after;
+    uint32_t read_count;
 } nvlog_posix_ctx_t;
 
 /**
@@ -50,6 +52,8 @@ int nvlog_posix_open_ram(nvlog_posix_ctx_t *pctx,
  * Set n = -1 to disable.
  */
 void nvlog_posix_inject_fail_after(nvlog_posix_ctx_t *pctx, int32_t n);
+
+void nvlog_posix_inject_read_fail_after(nvlog_posix_ctx_t *pctx, int32_t n);
 
 /**
  * Close and free resources.

@@ -178,23 +178,23 @@ static uint32_t sb_crc(const uint8_t *src)
     return nvlog_crc32_bytes(src, NVLOG_SUPERBLOCK_PAYLOAD_SIZE);
 }
 
-static int sb_read(nvlog_ctx_t *ctx, uint32_t offset, nvlog_superblock_t *sb)
+static nvlog_status_t sb_read(nvlog_ctx_t *ctx, uint32_t offset, nvlog_superblock_t *sb)
 {
     uint8_t raw[NVLOG_SUPERBLOCK_SIZE];
-    if (hal_read(ctx, offset, raw, sizeof(raw)) != 0) return -1;
-    if (sb_decode(sb, raw) != 0) return -1;
-    if (sb->magic != NVLOG_MEDIA_MAGIC) return -1;
-    if (sb->format_version != NVLOG_MEDIA_VERSION) return -1;
-    if (sb->reserved0 != 0) return -1;
-    if (sb->feature_flags != 0) return -1;
+    if (hal_read(ctx, offset, raw, sizeof(raw)) != 0) return NVLOG_ERR_IO;
+    if (sb_decode(sb, raw) != 0) return NVLOG_ERR_CORRUPT;
+    if (sb->magic != NVLOG_MEDIA_MAGIC) return NVLOG_ERR_CORRUPT;
+    if (sb->format_version != NVLOG_MEDIA_VERSION) return NVLOG_ERR_VERSION;
+    if (sb->reserved0 != 0) return NVLOG_ERR_RESERVED;
+    if (sb->feature_flags != 0) return NVLOG_ERR_UNSUPPORTED;
     if (sb->media_class != NVLOG_MEDIA_CLASS_BYTE_WRITABLE &&
         sb->media_class != NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE)
-        return -1;
+        return NVLOG_ERR_MEDIA_MISMATCH;
     if (ctx->media_class != 0 && sb->media_class != ctx->media_class)
-        return -1;
-    if (sb->mode != NVLOG_MODE_LINEAR && sb->mode != NVLOG_MODE_RING) return -1;
-    if (sb->crc32 != sb_crc(raw)) return -1;
-    return 0;
+        return NVLOG_ERR_MEDIA_MISMATCH;
+    if (sb->mode != NVLOG_MODE_LINEAR && sb->mode != NVLOG_MODE_RING) return NVLOG_ERR_MODE_MISMATCH;
+    if (sb->crc32 != sb_crc(raw)) return NVLOG_ERR_CORRUPT;
+    return NVLOG_OK;
 }
 
 static int sb_write(nvlog_ctx_t *ctx, uint32_t offset, const nvlog_superblock_t *sb)
@@ -290,18 +290,32 @@ static int rec_decode(nvlog_wire_rec_t *rec, const uint8_t *src)
     return 0;
 }
 
-static int load_current_superblock(nvlog_ctx_t *ctx, nvlog_superblock_t *out)
+static nvlog_status_t load_current_superblock(nvlog_ctx_t *ctx, nvlog_superblock_t *out)
 {
     nvlog_superblock_t a, b;
-    int have_a = sb_read(ctx, 0, &a) == 0;
-    int have_b = sb_read(ctx, NVLOG_SUPERBLOCK_SIZE, &b) == 0;
+    nvlog_status_t a_status = sb_read(ctx, 0, &a);
+    nvlog_status_t b_status = sb_read(ctx, NVLOG_SUPERBLOCK_SIZE, &b);
+    int have_a = a_status == NVLOG_OK;
+    int have_b = b_status == NVLOG_OK;
     if (have_a && have_b) {
         *out = superblock_is_newer(&a, &b) ? a : b;
-        return 0;
+        return NVLOG_OK;
     }
-    if (have_a) { *out = a; return 0; }
-    if (have_b) { *out = b; return 0; }
-    return -1;
+    if (have_a) { *out = a; return NVLOG_OK; }
+    if (have_b) { *out = b; return NVLOG_OK; }
+    if (a_status == NVLOG_ERR_IO || b_status == NVLOG_ERR_IO)
+        return NVLOG_ERR_IO;
+    if (a_status == NVLOG_ERR_VERSION || b_status == NVLOG_ERR_VERSION)
+        return NVLOG_ERR_VERSION;
+    if (a_status == NVLOG_ERR_RESERVED || b_status == NVLOG_ERR_RESERVED)
+        return NVLOG_ERR_RESERVED;
+    if (a_status == NVLOG_ERR_UNSUPPORTED || b_status == NVLOG_ERR_UNSUPPORTED)
+        return NVLOG_ERR_UNSUPPORTED;
+    if (a_status == NVLOG_ERR_MODE_MISMATCH || b_status == NVLOG_ERR_MODE_MISMATCH)
+        return NVLOG_ERR_MODE_MISMATCH;
+    if (a_status == NVLOG_ERR_MEDIA_MISMATCH || b_status == NVLOG_ERR_MEDIA_MISMATCH)
+        return NVLOG_ERR_MEDIA_MISMATCH;
+    return NVLOG_ERR_CORRUPT;
 }
 
 static uint32_t ring_capacity_bytes(const nvlog_ctx_t *ctx)
@@ -338,7 +352,7 @@ nvlog_status_t format_impl(nvlog_ctx_t *ctx,
     memset(&probe, 0, sizeof(probe));
     probe.hal = *hal;
     probe.region_size = region_size;
-    if (load_current_superblock(&probe, &current) == 0) {
+    if (load_current_superblock(&probe, &current) == NVLOG_OK) {
         generation = next_generation_value(current.generation);
         metadata_seq = current.metadata_seq + 1u;
         if (metadata_seq == 0) metadata_seq = 1u;
@@ -777,7 +791,8 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     ctx->session_id = g_nvlog_session_seed = next_session_value(g_nvlog_session_seed);
 
     nvlog_superblock_t sb;
-    if (load_current_superblock(ctx, &sb) != 0) return NVLOG_ERR_CORRUPT;
+    nvlog_status_t sb_status = load_current_superblock(ctx, &sb);
+    if (sb_status != NVLOG_OK) return sb_status;
     if (sb.mode != NVLOG_MODE_LINEAR) return NVLOG_ERR_MODE_MISMATCH;
     if (sb.region_size != region_size) return NVLOG_ERR_SIZE_MISMATCH;
     ctx->mode = (nvlog_mode_t)sb.mode;
@@ -1146,7 +1161,7 @@ nvlog_status_t nvlog_iter_next(nvlog_iter_t *it, nvlog_record_t *out)
 
 nvlog_status_t nvlog_read_payload(nvlog_ctx_t *ctx,
                                    const nvlog_record_t *record,
-                                   void *buf, uint16_t buf_size)
+                                   void *buf, size_t buf_size)
 {
     if (!ctx || !record || !buf) return NVLOG_ERR_PARAM;
     if (!ctx->mounted)           return NVLOG_ERR_NOT_MOUNTED;
@@ -1231,7 +1246,8 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
     ctx->session_id = g_nvlog_session_seed = next_session_value(g_nvlog_session_seed);
 
     nvlog_superblock_t sb;
-    if (load_current_superblock(ctx, &sb) != 0) return NVLOG_ERR_CORRUPT;
+    nvlog_status_t sb_status = load_current_superblock(ctx, &sb);
+    if (sb_status != NVLOG_OK) return sb_status;
     if (sb.mode != NVLOG_MODE_RING) return NVLOG_ERR_MODE_MISMATCH;
     if (sb.region_size != region_size) return NVLOG_ERR_SIZE_MISMATCH;
     ctx->generation = sb.generation;

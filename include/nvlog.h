@@ -242,7 +242,7 @@ nvlog_status_t nvlog_iter_next(nvlog_iter_t *it, nvlog_record_t *out);
 nvlog_status_t nvlog_read_payload(nvlog_ctx_t *ctx,
                                    const nvlog_record_t *record,
                                    void *buf,
-                                   uint16_t buf_size);
+                                   size_t buf_size);
 
 /**
  * nvlog_stats() — current usage counters.
