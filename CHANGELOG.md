@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7 - 2026-06-20
+
+- Kept mounts read-only while still refreshing in-memory session identity so stale iterators are invalidated without rewriting metadata on media.
+- Added regression coverage for read-only mount behavior and exact ring overwrite atomicity.
+
 ## 1.0.6 - 2026-06-20
 
 - Added the missing user-facing documentation layer: getting started, cookbook, architecture, porting, power-loss contract, API reference, testing, capacity planning, RTOS integration, hardware validation, contributing, security, and support guides.

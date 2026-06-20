@@ -9,7 +9,7 @@
 
 It is designed for embedded and host-simulated media where record recovery, deterministic encoding, and power-loss behavior matter more than a generic logging API.
 
-Current development version: `v1.0.6`.
+Current development version: `v1.0.7`.
 
 The public release tag is published. The GitHub Release object and any packaged
 assets are still pending, so treat this tree as the tagged development head
