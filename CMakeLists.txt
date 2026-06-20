@@ -90,6 +90,7 @@ target_include_directories(test_model PRIVATE include backends)
 target_link_libraries(test_model nvlog nvlog_posix)
 
 enable_testing()
+add_test(NAME truth_guard COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${CMAKE_SOURCE_DIR}/tools/truth_guard.ps1)
 add_test(NAME suite_v01 COMMAND test_nvlog)
 add_test(NAME suite_v02 COMMAND test_powerloss)
 add_test(NAME suite_v03 COMMAND test_flash)
@@ -99,5 +100,5 @@ add_test(NAME suite_v06 COMMAND compile_public_c)
 add_test(NAME suite_v07 COMMAND compile_public_cpp)
 add_test(NAME suite_v08 COMMAND test_model)
 
-set_tests_properties(suite_v01 suite_v02 suite_v03 suite_v04 suite_v05 suite_v06 suite_v07 suite_v08
+set_tests_properties(truth_guard suite_v01 suite_v02 suite_v03 suite_v04 suite_v05 suite_v06 suite_v07 suite_v08
     PROPERTIES TIMEOUT 30)
