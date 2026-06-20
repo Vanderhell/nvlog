@@ -262,6 +262,35 @@ static uint32_t rec_alloc_bytes(uint32_t payload_len, uint32_t program_unit)
     return align_up_u32(rec_total_bytes(payload_len), program_unit);
 }
 
+static uint8_t record_byte_at(const uint8_t *hdr_raw,
+                              uint32_t payload_len,
+                              const uint8_t *payload,
+                              uint32_t payload_off,
+                              uint32_t crc_off,
+                              uint32_t commit_off,
+                              uint32_t logical_off,
+                              uint32_t payload_crc,
+                              uint8_t erased_value)
+{
+    if (logical_off < NVLOG_RECORD_HEADER_SIZE)
+        return hdr_raw[logical_off];
+    if (logical_off < payload_off)
+        return erased_value;
+    if (logical_off < crc_off) {
+        uint32_t payload_idx = logical_off - payload_off;
+        if (payload_idx < payload_len)
+            return payload ? payload[payload_idx] : 0x00u;
+        return erased_value;
+    }
+    if (logical_off < commit_off) {
+        uint32_t crc_idx = logical_off - crc_off;
+        return ((const uint8_t *)&payload_crc)[crc_idx];
+    }
+    if (logical_off == commit_off)
+        return 0x00u;
+    return erased_value;
+}
+
 static void rec_encode(uint8_t *dst, const nvlog_wire_rec_t *rec)
 {
     dst[0] = rec->magic;
@@ -357,7 +386,8 @@ nvlog_status_t format_impl(nvlog_ctx_t *ctx,
                            uint8_t media_class,
                            uint8_t program_unit,
                            uint8_t erased_value,
-                           uint32_t geometry_key)
+                           uint32_t geometry_key,
+                           uint32_t requested_session_id)
 {
     nvlog_ctx_t probe;
     nvlog_superblock_t current;
@@ -383,7 +413,7 @@ nvlog_status_t format_impl(nvlog_ctx_t *ctx,
     ctx->metadata_seq = next_session_value(metadata_seq);
     ctx->mutation    = 1;
     ctx->geometry_key = geometry_key;
-    ctx->session_id = ctx->metadata_seq;
+    ctx->session_id = requested_session_id ? requested_session_id : ctx->metadata_seq;
     ctx->media_class = media_class;
     ctx->program_unit = program_unit;
     ctx->erased_value = erased_value;
@@ -394,9 +424,6 @@ nvlog_status_t format_impl(nvlog_ctx_t *ctx,
     ctx->free_bytes = (mode == NVLOG_MODE_RING)
                     ? ring_usable_bytes(ctx)
                     : (region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE);
-    ctx->metadata_seq = next_session_value(metadata_seq);
-    ctx->session_id = ctx->metadata_seq;
-
     nvlog_superblock_t sb = {
         .magic = NVLOG_MEDIA_MAGIC,
         .format_version = NVLOG_MEDIA_VERSION,
@@ -685,24 +712,28 @@ static int write_record_wire(nvlog_ctx_t *ctx,
     }
 
     if (ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
-        uint8_t *image = (uint8_t *)malloc(record_alloc);
-        if (!image) return NVLOG_ERR_IO;
-        memset(image, ctx->erased_value, record_alloc);
-        rec_encode(image, &rec);
-        if (payload_len > 0) {
-            if (payload) {
-                memcpy(image + payload_rel, payload, payload_len);
-            } else {
-                memset(image + payload_rel, 0x00, payload_len);
+        uint8_t image[NVLOG_MAX_PROGRAM_UNIT];
+        uint32_t offset = 0;
+
+        while (offset < record_alloc) {
+            uint32_t chunk_len = ctx->program_unit;
+            if (chunk_len > record_alloc - offset)
+                chunk_len = record_alloc - offset;
+            for (uint32_t i = 0; i < chunk_len; i++) {
+                image[i] = record_byte_at(raw,
+                                          payload_len,
+                                          (const uint8_t *)payload,
+                                          payload_rel,
+                                          crc_rel,
+                                          commit_rel,
+                                          offset + i,
+                                          payload_crc,
+                                          ctx->erased_value);
             }
+            if (hal_write(ctx, base + offset, image, chunk_len) != 0)
+                return NVLOG_ERR_IO;
+            offset += chunk_len;
         }
-        nvlog_store_u32le(image + crc_rel, payload_crc);
-        image[commit_rel] = 0x00u;
-        if (hal_write(ctx, base, image, record_alloc) != 0) {
-            free(image);
-            return NVLOG_ERR_IO;
-        }
-        free(image);
     } else {
         uint8_t commit = 0xFFu;
         if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0)
@@ -885,8 +916,10 @@ nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
     if (region_size <= (uint32_t)NVLOG_REGION_HEADER_SIZE ||
         region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE <= NVLOG_RECORD_OVERHEAD)
         return NVLOG_ERR_PARAM;
+    uint32_t requested_session_id = ctx->session_id;
     return format_impl(ctx, hal, region_size, NVLOG_MODE_LINEAR,
-                       NVLOG_MEDIA_CLASS_BYTE_WRITABLE, 1u, 0xFFu, 0u);
+                       NVLOG_MEDIA_CLASS_BYTE_WRITABLE, 1u, 0xFFu, 0u,
+                       requested_session_id);
 }
 
 /* --- nvlog_mount ---------------------------------------------- */
@@ -897,6 +930,7 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
 {
     if (!ctx || !hal || !hal->read || !hal->write)
         return NVLOG_ERR_PARAM;
+    uint32_t requested_session_id = ctx->session_id;
     memset(ctx, 0, sizeof(*ctx));
     ctx->hal         = *hal;
     ctx->region_size = region_size;
@@ -921,7 +955,7 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     ctx->media_class = sb.media_class;
     ctx->generation = sb.generation;
     ctx->metadata_seq = sb.metadata_seq;
-    ctx->session_id = next_session_value(sb.metadata_seq);
+    ctx->session_id = requested_session_id ? requested_session_id : next_session_value(sb.metadata_seq);
     ctx->mutation = 1;
     ctx->geometry_key = sb.feature_flags;
     ctx->program_unit = sb.reserved0 ? (uint8_t)sb.reserved0 : 1u;
@@ -1371,8 +1405,10 @@ nvlog_status_t nvlog_ring_format(nvlog_ctx_t *ctx,
         return NVLOG_ERR_PARAM;
     if (region_size <= (uint32_t)NVLOG_REGION_HEADER_SIZE + NVLOG_RING_RESERVE_BYTES)
         return NVLOG_ERR_PARAM;
+    uint32_t requested_session_id = ctx->session_id;
     return format_impl(ctx, hal, region_size, NVLOG_MODE_RING,
-                       NVLOG_MEDIA_CLASS_BYTE_WRITABLE, 1u, 0xFFu, 0u);
+                       NVLOG_MEDIA_CLASS_BYTE_WRITABLE, 1u, 0xFFu, 0u,
+                       requested_session_id);
 }
 
 /* --- nvlog_ring_mount ----------------------------------------- */
@@ -1382,6 +1418,7 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
                                  uint32_t region_size)
 {
     if (!ctx || !hal || !hal->read || !hal->write) return NVLOG_ERR_PARAM;
+    uint32_t requested_session_id = ctx->session_id;
     memset(ctx, 0, sizeof(*ctx));
     ctx->hal         = *hal;
     ctx->region_size = region_size;
@@ -1411,7 +1448,7 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
     ctx->geometry_key = sb.feature_flags;
     ctx->program_unit = sb.reserved0 ? (uint8_t)sb.reserved0 : 1u;
     ctx->metadata_seq = next_session_value(sb.metadata_seq);
-    ctx->session_id = ctx->metadata_seq;
+    ctx->session_id = requested_session_id ? requested_session_id : ctx->metadata_seq;
     if (ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
         if (ctx->program_unit != 1u &&
             ctx->program_unit != 4u &&

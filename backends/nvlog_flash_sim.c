@@ -32,7 +32,17 @@ static int sim_write(uint32_t addr, const void *buf, uint32_t len, void *user)
     }
 
     if (s->fail_during_write >= 0 && (uint32_t)s->fail_during_write < len) {
-        len = (uint32_t)s->fail_during_write;
+        uint32_t partial_len = (uint32_t)s->fail_during_write;
+        for (uint32_t i = 0; i < partial_len; i++) {
+            uint8_t current = s->mem[addr + i];
+            uint8_t next = src[i];
+            if ((next & ~current) != 0) {
+                s->bit_flip_violations++;
+                return -1;
+            }
+            s->mem[addr + i] = (uint8_t)(current & next);
+        }
+        return -1;
     }
 
     for (uint32_t i = 0; i < len; i++) {
@@ -44,9 +54,6 @@ static int sim_write(uint32_t addr, const void *buf, uint32_t len, void *user)
         }
         s->mem[addr + i] = (uint8_t)(current & next);
     }
-
-    if (s->fail_during_write >= 0 && (uint32_t)s->fail_during_write < len)
-        return -1;
 
     return 0;
 }
@@ -68,7 +75,14 @@ static int sim_erase(uint32_t addr, uint32_t len, void *user)
     }
 
     if (s->fail_during_erase >= 0 && (uint32_t)s->fail_during_erase < len) {
-        len = (uint32_t)s->fail_during_erase;
+        uint32_t partial_len = (uint32_t)s->fail_during_erase;
+        for (uint32_t off = 0; off < partial_len; off += s->sector_size) {
+            memset(s->mem + addr + off, s->erased_value, s->sector_size);
+            uint32_t sec = (addr + off) / s->sector_size;
+            if (sec < s->num_sectors)
+                s->erase_counts[sec]++;
+        }
+        return -1;
     }
 
     for (uint32_t off = 0; off < len; off += s->sector_size) {
@@ -77,9 +91,6 @@ static int sim_erase(uint32_t addr, uint32_t len, void *user)
         if (sec < s->num_sectors)
             s->erase_counts[sec]++;
     }
-
-    if (s->fail_during_erase >= 0 && (uint32_t)s->fail_during_erase < len)
-        return -1;
 
     return 0;
 }

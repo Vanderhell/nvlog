@@ -350,6 +350,30 @@ static void test_iterator_invalidation(void)
     close_ring(&pctx);
 }
 
+static void test_remount_invalidates_iterator(void)
+{
+    TEST("ring remount invalidates iterator");
+    uint32_t size = ring_large_size();
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    ctx.session_id = 0xBEEF0001u;
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    append_record(&ctx, 0, 4u);
+
+    nvlog_iter_t it;
+    nvlog_record_t rec;
+    CHECK(nvlog_iter_init(&it, &ctx) == NVLOG_OK);
+
+    ctx.session_id = 0xBEEF0002u;
+    CHECK(nvlog_ring_mount(&ctx, &hal, size) == NVLOG_OK);
+    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_ERR_STALE);
+
+    close_ring(&pctx);
+}
+
 static void test_stale_descriptor(void)
 {
     TEST("ring stale descriptor");
@@ -507,6 +531,54 @@ static void test_old_or_new_overwrite(void)
     close_ring(&pctx);
 }
 
+static void test_forced_overwrite_and_continue(void)
+{
+    TEST("ring forced overwrite and continue");
+    uint32_t size = ring_size(256u);
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    ctx.session_id = 0xA5A50001u;
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+
+    uint8_t a[64], b[64], c[64], d[64];
+    make_payload(a, 64u, 1u);
+    make_payload(b, 64u, 2u);
+    make_payload(c, 64u, 3u);
+    make_payload(d, 64u, 4u);
+
+    CHECK(nvlog_append(&ctx, a, sizeof(a)) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, b, sizeof(b)) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, c, sizeof(c)) == NVLOG_OK);
+
+    nvlog_ctx_t rm;
+    rm.session_id = 0xA5A50002u;
+    CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
+    nvlog_record_t recs[8];
+    uint32_t n = collect_records(&rm, recs, 8);
+    CHECK(n == 2u);
+    CHECK(recs[0].seq == 1u);
+    CHECK(recs[1].seq == 2u);
+
+    CHECK(nvlog_append(&rm, d, sizeof(d)) == NVLOG_OK);
+
+    nvlog_ctx_t rm2;
+    rm2.session_id = 0xA5A50003u;
+    CHECK(nvlog_ring_mount(&rm2, &hal, size) == NVLOG_OK);
+    n = collect_records(&rm2, recs, 8);
+    CHECK(n == 2u);
+    CHECK(recs[0].seq == 2u);
+    CHECK(recs[1].seq == 3u);
+
+    uint8_t buf[64];
+    CHECK(nvlog_read_payload(&rm2, &recs[1], buf, sizeof(buf)) == NVLOG_OK);
+    CHECK(memcmp(buf, d, sizeof(d)) == 0);
+
+    close_ring(&pctx);
+}
+
 int main(void)
 {
     printf("nvlog ring tests\n");
@@ -522,7 +594,9 @@ int main(void)
     test_corrupt_header_payload_commit();
     test_interrupted_append();
     test_iterator_invalidation();
+    test_remount_invalidates_iterator();
     test_stale_descriptor();
+    test_forced_overwrite_and_continue();
     test_sequence_wraparound();
     test_full_capacity();
     test_old_or_new_overwrite();
