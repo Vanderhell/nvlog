@@ -18,7 +18,7 @@ The tree verifies the host test suites on Windows with CTest, including MSVC Rel
 
 ## Verified Baseline
 
-- 10 CTest suites in the current tree
+- 9 CTest suites in the current tree
 - host Release and Debug builds with MSVC on Windows
 - strict warning-as-error Release and Debug builds with MSVC
 - Win32 Release and strict Release builds with MSVC
