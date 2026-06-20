@@ -50,4 +50,4 @@
 - [ ] changelog updated if user-visible
 - [ ] no test weakening
 - [ ] no AI tool attribution in `Author` or `Co-Authored-By`
-
+- [ ] issue or pull request template was used where applicable

@@ -57,7 +57,10 @@ User-facing documentation:
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
 - [Support](SUPPORT.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Examples](examples/README.md)
+- [Issue templates](.github/ISSUE_TEMPLATE)
+- [Pull request template](.github/PULL_REQUEST_TEMPLATE.md)
 
 ## Build
 

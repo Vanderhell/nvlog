@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Support
+    url: https://github.com/Vanderhell/nvlog/blob/master/SUPPORT.md
+    about: Ask usage questions or request clarification on supported behavior.
+  - name: Security
+    url: https://github.com/Vanderhell/nvlog/blob/master/SECURITY.md
+    about: Report memory corruption, bounds, or recovery issues privately.
+  - name: Contributing
+    url: https://github.com/Vanderhell/nvlog/blob/master/CONTRIBUTING.md
+    about: Review repository rules before opening a change request.
