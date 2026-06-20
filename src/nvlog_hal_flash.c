@@ -14,6 +14,11 @@ extern nvlog_status_t format_impl(nvlog_ctx_t *ctx,
                                   uint8_t erased_value,
                                   uint32_t geometry_key);
 
+static uint32_t flash_geometry_key(uint32_t erase_size, uint32_t prog_size)
+{
+    return ((erase_size / 1024u) << 8) | (prog_size & 0xFFu);
+}
+
 /* ─── nvlog_flash_format ─────────────────────────────────────── */
 
 nvlog_status_t nvlog_flash_format(nvlog_ctx_t             *ctx,
@@ -38,7 +43,7 @@ nvlog_status_t nvlog_flash_format(nvlog_ctx_t             *ctx,
     ctx->media_class = NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE;
     ctx->program_unit = (uint8_t)flash->prog_size;
     ctx->erased_value = 0xFFu;
-    ctx->geometry_key = (flash->erase_size << 16) | (flash->prog_size & 0xFFFFu);
+    ctx->geometry_key = flash_geometry_key(flash->erase_size, flash->prog_size);
 
     /* erase entire region sector by sector */
     for (uint32_t off = 0; off < region_size; off += flash->erase_size) {
@@ -51,7 +56,7 @@ nvlog_status_t nvlog_flash_format(nvlog_ctx_t             *ctx,
                        NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE,
                        (uint8_t)flash->prog_size,
                        0xFFu,
-                       (flash->erase_size << 16) | (flash->prog_size & 0xFFFFu));
+                       flash_geometry_key(flash->erase_size, flash->prog_size));
 }
 
 /* ─── nvlog_flash_verify_erased ──────────────────────────────── */

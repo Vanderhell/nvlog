@@ -37,12 +37,15 @@ static int posix_write(uint32_t addr, const void *buf, uint32_t len, void *user)
 {
     nvlog_posix_ctx_t *p = (nvlog_posix_ctx_t *)user;
     if (!p || (!buf && len > 0)) return -1;
-    if (addr > p->size || len > p->size - addr) return -1;
+    if (addr > p->size || len > p->size - addr)
+        return -1;
 
     /* power-loss injection */
     if (p->fail_after >= 0) {
         if (p->write_count >= (uint32_t)p->fail_after)
+        {
             return -1;   /* simulated power loss */
+        }
         p->write_count++;
     }
 

@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.0.5 - 2026-06-20
 
-- Pending follow-up work will continue under the next audited release line.
+- Final audited release head after the stage evidence, CI, and release-tag audit pass.
+- Recorded the completed stage ledger, final audit evidence, and generated evidence manifest.
+- Anchored the audited head with a fresh annotated release tag.
 
 ## 1.0.4 - 2026-06-20
 

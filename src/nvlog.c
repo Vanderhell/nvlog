@@ -9,10 +9,11 @@
 
 #include "nvlog.h"
 #include <string.h>
+#include <stdlib.h>
 #include "nvlog_wire.h"
 
 #define NVLOG_SUPERBLOCK_PAYLOAD_SIZE 60u
-#define NVLOG_RING_RESERVE_BYTES NVLOG_RECORD_OVERHEAD
+#define NVLOG_RING_RESERVE_BYTES (NVLOG_RECORD_OVERHEAD + NVLOG_MAX_PAYLOAD)
 
 #ifdef _MSC_VER
 #pragma pack(push, 1)
@@ -186,8 +187,6 @@ static nvlog_status_t sb_read(nvlog_ctx_t *ctx, uint32_t offset, nvlog_superbloc
     if (sb_decode(sb, raw) != 0) return NVLOG_ERR_CORRUPT;
     if (sb->magic != NVLOG_MEDIA_MAGIC) return NVLOG_ERR_CORRUPT;
     if (sb->format_version != NVLOG_MEDIA_VERSION) return NVLOG_ERR_VERSION;
-    if (sb->reserved0 != 0) return NVLOG_ERR_RESERVED;
-    if (sb->feature_flags != 0) return NVLOG_ERR_UNSUPPORTED;
     if (sb->media_class != NVLOG_MEDIA_CLASS_BYTE_WRITABLE &&
         sb->media_class != NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE)
         return NVLOG_ERR_MEDIA_MISMATCH;
@@ -238,6 +237,16 @@ static uint32_t next_session_value(uint32_t current)
     return current;
 }
 
+static uint32_t align_up_u32(uint32_t value, uint32_t alignment)
+{
+    uint32_t remainder;
+
+    if (alignment <= 1u) return value;
+    remainder = value % alignment;
+    if (remainder == 0u) return value;
+    return value + (alignment - remainder);
+}
+
 static uint32_t rec_header_crc(const uint8_t *raw)
 {
     return nvlog_crc32_bytes(raw, 28u);
@@ -248,9 +257,9 @@ static uint32_t rec_total_bytes(uint32_t payload_len)
     return NVLOG_RECORD_OVERHEAD + payload_len;
 }
 
-static uint32_t rec_alloc_bytes(uint32_t payload_len)
+static uint32_t rec_alloc_bytes(uint32_t payload_len, uint32_t program_unit)
 {
-    return rec_total_bytes(payload_len);
+    return align_up_u32(rec_total_bytes(payload_len), program_unit);
 }
 
 static void rec_encode(uint8_t *dst, const nvlog_wire_rec_t *rec)
@@ -326,15 +335,20 @@ static uint32_t ring_capacity_bytes(const nvlog_ctx_t *ctx)
     return ctx->region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE;
 }
 
+static uint32_t ring_data_limit_bytes(const nvlog_ctx_t *ctx)
+{
+    if (!ctx || ctx->region_size <= ctx->reserve_bytes)
+        return 0;
+    return ctx->region_size - ctx->reserve_bytes;
+}
+
 static uint32_t ring_usable_bytes(const nvlog_ctx_t *ctx)
 {
     uint32_t capacity = ring_capacity_bytes(ctx);
-    uint32_t reserve = (ctx && ctx->record_count > 0) ? ctx->reserve_bytes : 0u;
+    uint32_t reserve = ctx ? ctx->reserve_bytes : 0u;
     if (capacity <= reserve) return 0;
     return capacity - reserve;
 }
-
-static uint32_t g_nvlog_session_seed = 1u;
 
 nvlog_status_t format_impl(nvlog_ctx_t *ctx,
                            const nvlog_hal_t *hal,
@@ -366,10 +380,10 @@ nvlog_status_t format_impl(nvlog_ctx_t *ctx,
     ctx->tail_ptr    = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     ctx->mode        = mode;
     ctx->generation  = generation;
-    ctx->metadata_seq = metadata_seq;
+    ctx->metadata_seq = next_session_value(metadata_seq);
     ctx->mutation    = 1;
     ctx->geometry_key = geometry_key;
-    ctx->session_id = g_nvlog_session_seed = next_session_value(g_nvlog_session_seed);
+    ctx->session_id = ctx->metadata_seq;
     ctx->media_class = media_class;
     ctx->program_unit = program_unit;
     ctx->erased_value = erased_value;
@@ -380,6 +394,8 @@ nvlog_status_t format_impl(nvlog_ctx_t *ctx,
     ctx->free_bytes = (mode == NVLOG_MODE_RING)
                     ? ring_usable_bytes(ctx)
                     : (region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE);
+    ctx->metadata_seq = next_session_value(metadata_seq);
+    ctx->session_id = ctx->metadata_seq;
 
     nvlog_superblock_t sb = {
         .magic = NVLOG_MEDIA_MAGIC,
@@ -388,7 +404,7 @@ nvlog_status_t format_impl(nvlog_ctx_t *ctx,
         .media_class = media_class,
         .region_size = region_size,
         .generation = generation,
-        .metadata_seq = metadata_seq,
+        .metadata_seq = ctx->metadata_seq,
         .write_ptr = ctx->write_ptr,
         .tail_ptr = ctx->tail_ptr,
         .next_seq = 0,
@@ -397,8 +413,8 @@ nvlog_status_t format_impl(nvlog_ctx_t *ctx,
         .free_bytes = ctx->free_bytes,
         .padding_bytes = 0,
         .reserve_bytes = ctx->reserve_bytes,
-        .feature_flags = 0,
-        .reserved0 = 0,
+        .feature_flags = geometry_key,
+        .reserved0 = program_unit,
         .crc32 = 0,
     };
 
@@ -430,8 +446,8 @@ static int ring_publish_superblocks(nvlog_ctx_t *ctx)
         .free_bytes = ctx->free_bytes,
         .padding_bytes = ctx->padding_bytes,
         .reserve_bytes = ctx->reserve_bytes,
-        .feature_flags = 0,
-        .reserved0 = 0,
+        .feature_flags = ctx->geometry_key,
+        .reserved0 = ctx->program_unit,
         .crc32 = 0,
     };
     if (sb_write(ctx, 0, &sb) != 0) return -1;
@@ -446,11 +462,12 @@ static uint32_t ring_count_records(const nvlog_ctx_t *ctx)
 
 static uint32_t ring_normalize_tail_cursor(const nvlog_ctx_t *ctx, uint32_t cursor)
 {
+    uint32_t data_limit = ring_data_limit_bytes(ctx);
     if (!ctx) return cursor;
     if (cursor != (uint32_t)NVLOG_REGION_HEADER_SIZE &&
-        cursor < ctx->region_size &&
+        cursor < data_limit &&
         ctx->write_ptr < cursor &&
-        ctx->region_size - cursor < NVLOG_RECORD_OVERHEAD)
+        data_limit - cursor < NVLOG_RECORD_OVERHEAD)
         return (uint32_t)NVLOG_REGION_HEADER_SIZE;
     return cursor;
 }
@@ -458,6 +475,7 @@ static uint32_t ring_normalize_tail_cursor(const nvlog_ctx_t *ctx, uint32_t curs
 static nvlog_status_t ring_retire_tail_to_free(nvlog_ctx_t *ctx, uint32_t required_free)
 {
     if (!ctx) return NVLOG_ERR_PARAM;
+    uint32_t data_limit = ring_data_limit_bytes(ctx);
 
     while (ctx->free_bytes < required_free && ctx->record_count > 0) {
         ctx->tail_ptr = ring_normalize_tail_cursor(ctx, ctx->tail_ptr);
@@ -472,7 +490,7 @@ static nvlog_status_t ring_retire_tail_to_free(nvlog_ctx_t *ctx, uint32_t requir
             return NVLOG_ERR_CORRUPT;
 
         ctx->tail_ptr += rec_total;
-        if (ctx->tail_ptr >= ctx->region_size)
+        if (ctx->tail_ptr >= data_limit)
             ctx->tail_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
         ctx->tail_ptr = ring_normalize_tail_cursor(ctx, ctx->tail_ptr);
 
@@ -492,6 +510,7 @@ static nvlog_status_t ring_retire_tail_to_free(nvlog_ctx_t *ctx, uint32_t requir
 
 static int ring_validate_window(nvlog_ctx_t *ctx)
 {
+    uint32_t data_limit = ring_data_limit_bytes(ctx);
     uint32_t occupied = 0;
     uint32_t cursor = 0;
     uint32_t data_count = 0;
@@ -501,14 +520,14 @@ static int ring_validate_window(nvlog_ctx_t *ctx)
     int have_seq = 0;
 
     if (!ctx) return -1;
-    if (ctx->tail_ptr >= ctx->region_size || ctx->write_ptr >= ctx->region_size)
+    if (ctx->tail_ptr >= data_limit || ctx->write_ptr >= data_limit)
         return -1;
     if (ctx->write_ptr == ctx->tail_ptr) {
-        occupied = (ctx->record_count > 0) ? ring_capacity_bytes(ctx) : 0u;
+        occupied = (ctx->record_count > 0) ? ring_usable_bytes(ctx) : 0u;
     } else if (ctx->write_ptr > ctx->tail_ptr) {
         occupied = ctx->write_ptr - ctx->tail_ptr;
     } else {
-        uint32_t tail_gap = ctx->region_size - ctx->tail_ptr;
+        uint32_t tail_gap = data_limit - ctx->tail_ptr;
         uint32_t head_span = ctx->write_ptr - (uint32_t)NVLOG_REGION_HEADER_SIZE;
         if (!nvlog_u32_add_checked(tail_gap, head_span, &occupied))
             return -1;
@@ -516,9 +535,9 @@ static int ring_validate_window(nvlog_ctx_t *ctx)
     cursor = ctx->tail_ptr;
     while (occupied > 0) {
         if (cursor != (uint32_t)NVLOG_REGION_HEADER_SIZE &&
-            (cursor > ctx->region_size || ctx->region_size - cursor < NVLOG_RECORD_OVERHEAD) &&
+            (cursor > data_limit || data_limit - cursor < NVLOG_RECORD_OVERHEAD) &&
             ctx->write_ptr < cursor) {
-            uint32_t gap = ctx->region_size - cursor;
+            uint32_t gap = data_limit - cursor;
             if (gap > occupied) return -1;
             padding_bytes += gap;
             occupied -= gap;
@@ -548,7 +567,7 @@ static int ring_validate_window(nvlog_ctx_t *ctx)
         }
         occupied -= rec_total;
         cursor += rec_total;
-        if (cursor >= ctx->region_size)
+        if (cursor >= data_limit)
             cursor = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     }
 
@@ -558,10 +577,8 @@ static int ring_validate_window(nvlog_ctx_t *ctx)
     ctx->padding_bytes = padding_bytes;
     if (have_seq)
         ctx->next_seq = (uint32_t)(last_seq + 1u);
-    else
-        ctx->next_seq = 0u;
     {
-        uint32_t usable = ring_capacity_bytes(ctx);
+        uint32_t usable = ring_usable_bytes(ctx);
         uint32_t occupied_all = 0;
         if (!nvlog_u32_add_checked(data_bytes, padding_bytes, &occupied_all))
             return -1;
@@ -609,9 +626,13 @@ static int write_record_wire(nvlog_ctx_t *ctx,
                              uint32_t *total_out)
 {
     uint32_t record_total = rec_total_bytes(payload_len);
+    uint32_t record_alloc = rec_alloc_bytes(payload_len, ctx->program_unit);
     uint32_t payload_off = 0;
     uint32_t crc_off = 0;
     uint32_t commit_off = 0;
+    uint32_t payload_rel = 0;
+    uint32_t crc_rel = 0;
+    uint32_t commit_rel = 0;
     uint32_t end_off = 0;
     uint8_t raw[NVLOG_RECORD_HEADER_SIZE];
     nvlog_wire_rec_t rec = {
@@ -625,7 +646,7 @@ static int write_record_wire(nvlog_ctx_t *ctx,
         .seq = seq,
         .payload_len = payload_len,
         .total_len = record_total,
-        .alloc_len = record_total,
+        .alloc_len = record_alloc,
         .crc32 = 0,
     };
 
@@ -635,9 +656,13 @@ static int write_record_wire(nvlog_ctx_t *ctx,
         return NVLOG_ERR_BOUNDS;
     if (!nvlog_u32_add_checked(crc_off, NVLOG_RECORD_CRC_SIZE, &commit_off))
         return NVLOG_ERR_BOUNDS;
-    if (!nvlog_u32_add_checked(base, record_total, &end_off))
+    if (!nvlog_u32_add_checked(base, record_alloc, &end_off))
         return NVLOG_ERR_BOUNDS;
     if (end_off > ctx->region_size) return NVLOG_ERR_BOUNDS;
+
+    payload_rel = payload_off - base;
+    crc_rel = crc_off - base;
+    commit_rel = commit_off - base;
 
     rec_encode(raw, &rec);
     rec.crc32 = rec_header_crc(raw);
@@ -659,29 +684,56 @@ static int write_record_wire(nvlog_ctx_t *ctx,
         }
     }
 
-    uint8_t commit = 0xFFu;
-    if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0) return NVLOG_ERR_IO;
-    if (hal_write(ctx, base, raw, sizeof(raw)) != 0) return NVLOG_ERR_IO;
-    if (payload_len > 0) {
-        if (payload) {
-            if (hal_write(ctx, payload_off, payload, payload_len) != 0) return NVLOG_ERR_IO;
-        } else {
-            uint8_t zero_chunk[16] = {0};
-            uint32_t remaining = payload_len;
-            uint32_t off = payload_off;
-            while (remaining > 0) {
-                uint32_t n = remaining < sizeof(zero_chunk) ? remaining : sizeof(zero_chunk);
-                if (hal_write(ctx, off, zero_chunk, n) != 0) return NVLOG_ERR_IO;
-                off += n;
-                remaining -= n;
+    if (ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
+        uint8_t *image = (uint8_t *)malloc(record_alloc);
+        if (!image) return NVLOG_ERR_IO;
+        memset(image, ctx->erased_value, record_alloc);
+        rec_encode(image, &rec);
+        if (payload_len > 0) {
+            if (payload) {
+                memcpy(image + payload_rel, payload, payload_len);
+            } else {
+                memset(image + payload_rel, 0x00, payload_len);
             }
         }
+        nvlog_store_u32le(image + crc_rel, payload_crc);
+        image[commit_rel] = 0x00u;
+        if (hal_write(ctx, base, image, record_alloc) != 0) {
+            free(image);
+            return NVLOG_ERR_IO;
+        }
+        free(image);
+    } else {
+        uint8_t commit = 0xFFu;
+        if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0)
+            return NVLOG_ERR_IO;
+        if (hal_write(ctx, base, raw, sizeof(raw)) != 0)
+            return NVLOG_ERR_IO;
+        if (payload_len > 0) {
+            if (payload) {
+                if (hal_write(ctx, payload_off, payload, payload_len) != 0)
+                    return NVLOG_ERR_IO;
+            } else {
+                uint8_t zero_chunk[16] = {0};
+                uint32_t remaining = payload_len;
+                uint32_t off = payload_off;
+                while (remaining > 0) {
+                    uint32_t n = remaining < sizeof(zero_chunk) ? remaining : sizeof(zero_chunk);
+                    if (hal_write(ctx, off, zero_chunk, n) != 0)
+                        return NVLOG_ERR_IO;
+                    off += n;
+                    remaining -= n;
+                }
+            }
+        }
+        if (hal_write(ctx, crc_off, &payload_crc, sizeof(payload_crc)) != 0)
+            return NVLOG_ERR_IO;
+        commit = 0x00u;
+        if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0)
+            return NVLOG_ERR_IO;
     }
-    if (hal_write(ctx, crc_off, &payload_crc, sizeof(payload_crc)) != 0) return NVLOG_ERR_IO;
-    commit = 0x00u;
-    if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0) return NVLOG_ERR_IO;
 
-    if (total_out) *total_out = record_total;
+    if (total_out) *total_out = record_alloc;
     return NVLOG_OK;
 }
 
@@ -695,6 +747,7 @@ static nvlog_verify_result_t verify_record(nvlog_ctx_t *ctx, uint32_t cursor,
     uint8_t raw[NVLOG_RECORD_HEADER_SIZE];
     nvlog_wire_rec_t hdr;
     uint8_t commit = 0x00u;
+    uint8_t crc_raw[sizeof(uint32_t)];
     uint32_t stored_crc = 0;
     uint32_t total = 0;
     uint32_t end = 0;
@@ -712,33 +765,56 @@ static nvlog_verify_result_t verify_record(nvlog_ctx_t *ctx, uint32_t cursor,
         }
         return NVLOG_VERIFY_CORRUPT;
     }
-    if (hdr.version != NVLOG_RECORD_VERSION) return NVLOG_VERIFY_VERSION;
-    if (hdr.mode != ctx->mode) return NVLOG_VERIFY_MODE_MISMATCH;
+    if (hdr.version != NVLOG_RECORD_VERSION)
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_VERSION;
+    if (hdr.mode != ctx->mode)
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_MODE_MISMATCH;
     if (hdr.flags != NVLOG_FLAGS_LINEAR && hdr.flags != NVLOG_FLAGS_RING)
-        return NVLOG_VERIFY_FLAGS;
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_FLAGS;
     if (hdr.reserved[0] != 0u || hdr.reserved[1] != 0u || hdr.reserved[2] != 0u)
-        return NVLOG_VERIFY_RESERVED;
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_RESERVED;
     if (hdr.type != NVLOG_RECORD_TYPE_DATA &&
         hdr.type != NVLOG_RECORD_TYPE_WRAP &&
         hdr.type != NVLOG_RECORD_TYPE_PADDING)
-        return NVLOG_VERIFY_TYPE;
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_TYPE;
     if (hdr.type == NVLOG_RECORD_TYPE_DATA && hdr.payload_len > NVLOG_MAX_PAYLOAD)
-        return NVLOG_VERIFY_SIZE_MISMATCH;
-    if (hdr.generation != ctx->generation) return NVLOG_VERIFY_GENERATION_MISMATCH;
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_SIZE_MISMATCH;
+    if (hdr.generation != ctx->generation)
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_GENERATION_MISMATCH;
     if (hdr.total_len != rec_total_bytes(hdr.payload_len))
-        return NVLOG_VERIFY_SIZE_MISMATCH;
-    if (hdr.alloc_len != rec_alloc_bytes(hdr.payload_len))
-        return NVLOG_VERIFY_SIZE_MISMATCH;
-    if (hdr.crc32 != rec_header_crc(raw)) return NVLOG_VERIFY_CORRUPT;
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_SIZE_MISMATCH;
+    if (hdr.alloc_len != rec_alloc_bytes(hdr.payload_len, ctx->program_unit))
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_SIZE_MISMATCH;
+    if (hdr.crc32 != rec_header_crc(raw))
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_CORRUPT;
 
     if (!nvlog_u32_add_checked(NVLOG_RECORD_OVERHEAD, hdr.payload_len, &total))
-        return NVLOG_VERIFY_BOUNDS;
-    if (!nvlog_u32_add_checked(cursor, total, &end)) return NVLOG_VERIFY_BOUNDS;
-    if (end > ctx->region_size) return NVLOG_VERIFY_INCOMPLETE;
-    if (!nvlog_u32_add_checked(cursor, NVLOG_RECORD_HEADER_SIZE, &payload_off)) return NVLOG_VERIFY_BOUNDS;
-    if (!nvlog_u32_add_checked(payload_off, hdr.payload_len, &crc_off)) return NVLOG_VERIFY_BOUNDS;
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_BOUNDS;
+    if (!nvlog_u32_add_checked(cursor, hdr.alloc_len, &end))
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_BOUNDS;
+    if (end > ctx->region_size)
+        return NVLOG_VERIFY_INCOMPLETE;
+    if (!nvlog_u32_add_checked(cursor, NVLOG_RECORD_HEADER_SIZE, &payload_off))
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_BOUNDS;
+    if (!nvlog_u32_add_checked(payload_off, hdr.payload_len, &crc_off))
+        return ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE
+            ? NVLOG_VERIFY_INCOMPLETE : NVLOG_VERIFY_BOUNDS;
 
-    if (hal_read(ctx, crc_off, &stored_crc, sizeof(stored_crc)) != 0) return NVLOG_VERIFY_HAL_READ;
+    if (hal_read(ctx, crc_off, crc_raw, sizeof(crc_raw)) != 0) return NVLOG_VERIFY_HAL_READ;
+    stored_crc = nvlog_load_u32le(crc_raw);
     if (hal_read(ctx, crc_off + sizeof(stored_crc), &commit, sizeof(commit)) != 0) return NVLOG_VERIFY_HAL_READ;
 
     if (is_all_value((const uint8_t *)&stored_crc, sizeof(stored_crc), ctx->erased_value) ||
@@ -776,7 +852,7 @@ static nvlog_verify_result_t verify_record(nvlog_ctx_t *ctx, uint32_t cursor,
         hdr_out->alloc_len = hdr.alloc_len;
         hdr_out->crc32 = hdr.crc32;
     }
-    if (total_out) *total_out = total;
+    if (total_out) *total_out = hdr.alloc_len;
     if (payload_crc_out) *payload_crc_out = stored_crc;
     return NVLOG_VERIFY_VALID;
 }
@@ -790,8 +866,9 @@ static nvlog_verify_result_t verify_record(nvlog_ctx_t *ctx, uint32_t cursor,
  */
 static void normalize_write_ptr(nvlog_ctx_t *ctx)
 {
+    uint32_t data_limit = ring_data_limit_bytes(ctx);
     if (ctx->mode == NVLOG_MODE_RING &&
-        ctx->write_ptr >= ctx->region_size) {
+        ctx->write_ptr >= data_limit) {
         ctx->write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
         ctx->ring_full = 1;   /* wrapping = ring is full */
     }
@@ -835,8 +912,6 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     ctx->media_class = 0;
     ctx->program_unit = 1u;
     ctx->erased_value = 0xFFu;
-    ctx->session_id = g_nvlog_session_seed = next_session_value(g_nvlog_session_seed);
-
     nvlog_superblock_t sb;
     nvlog_status_t sb_status = load_current_superblock(ctx, &sb);
     if (sb_status != NVLOG_OK) return sb_status;
@@ -846,7 +921,19 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     ctx->media_class = sb.media_class;
     ctx->generation = sb.generation;
     ctx->metadata_seq = sb.metadata_seq;
+    ctx->session_id = next_session_value(sb.metadata_seq);
     ctx->mutation = 1;
+    ctx->geometry_key = sb.feature_flags;
+    ctx->program_unit = sb.reserved0 ? (uint8_t)sb.reserved0 : 1u;
+    if (ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
+        if (ctx->program_unit != 1u &&
+            ctx->program_unit != 4u &&
+            ctx->program_unit != 8u &&
+            ctx->program_unit != 32u)
+            return NVLOG_ERR_UNSUPPORTED;
+    } else if (ctx->program_unit != 1u) {
+        return NVLOG_ERR_UNSUPPORTED;
+    }
 
     uint32_t cursor = (uint32_t)NVLOG_REGION_HEADER_SIZE;
     uint32_t record_count = 0;
@@ -888,61 +975,29 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
     if (len > NVLOG_MAX_PAYLOAD)       return NVLOG_ERR_TOO_LARGE;
 
     uint32_t payload_len = (uint32_t)len;
-    uint32_t total = rec_total_bytes(payload_len);
+    uint32_t total = rec_alloc_bytes(payload_len, ctx->program_unit);
 
     if (ctx->mode == NVLOG_MODE_RING) {
         uint32_t capacity = ring_capacity_bytes(ctx);
         uint32_t usable = ring_usable_bytes(ctx);
+        uint32_t data_limit = ring_data_limit_bytes(ctx);
         uint32_t base = ctx->write_ptr;
         uint32_t remaining = 0;
         uint32_t new_tail = ctx->tail_ptr;
-        uint32_t retired = 0;
-        uint32_t evicted = 0;
-        uint32_t occupied_live = 0;
 
         if (capacity == 0 || usable == 0) return NVLOG_ERR_FULL;
         if (total > capacity) return NVLOG_ERR_FULL;
-        if (!nvlog_u32_add_checked(ctx->used_bytes, ctx->padding_bytes, &occupied_live))
-            return NVLOG_ERR_BOUNDS;
 
-        if (occupied_live + total > usable) {
-            uint32_t retire_bytes = (occupied_live + total) - usable;
-            uint32_t cursor = ctx->tail_ptr;
-            while (retired < retire_bytes && evicted <= ctx->record_count) {
-                if (cursor != (uint32_t)NVLOG_REGION_HEADER_SIZE &&
-                    cursor + NVLOG_RECORD_OVERHEAD > ctx->region_size &&
-                    ctx->write_ptr < cursor) {
-                    uint32_t gap = ctx->region_size - cursor;
-                    retired += gap;
-                    cursor = (uint32_t)NVLOG_REGION_HEADER_SIZE;
-                    continue;
-                }
-                nvlog_wire_rec_t hdr;
-                uint32_t rec_total = 0;
-                nvlog_verify_result_t vr = verify_record(ctx, cursor, &hdr, &rec_total, NULL);
-                nvlog_status_t st = verify_result_status(vr);
-                if (st != NVLOG_OK) return st;
-                retired += rec_total;
-                if (hdr.type == NVLOG_RECORD_TYPE_DATA) {
-                    evicted++;
-                }
-                cursor += rec_total;
-                if (cursor >= ctx->region_size)
-                    cursor = (uint32_t)NVLOG_REGION_HEADER_SIZE;
-            }
-            new_tail = cursor;
-        }
-
-        if (base > ctx->region_size || ctx->region_size - base < total) {
-            remaining = ctx->region_size - base;
+        if (base > data_limit || data_limit - base < total) {
+            remaining = data_limit - base;
             if (remaining > 0 && remaining < NVLOG_RECORD_OVERHEAD) {
                 ctx->padding_bytes += remaining;
                 ctx->write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
                 base = (uint32_t)NVLOG_REGION_HEADER_SIZE;
-            } else if (remaining > NVLOG_RECORD_OVERHEAD) {
+            } else if (remaining >= NVLOG_RECORD_OVERHEAD) {
                 uint32_t pad_total = 0;
                 int rc = write_record_wire(ctx, base,
-                                           NVLOG_RECORD_TYPE_PADDING,
+                                           NVLOG_RECORD_TYPE_WRAP,
                                            NVLOG_FLAGS_RING,
                                            NVLOG_MODE_RING,
                                            ctx->next_seq,
@@ -952,27 +1007,20 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
                                            &pad_total);
                 if (rc != NVLOG_OK) return (nvlog_status_t)rc;
                 ctx->padding_bytes += pad_total;
+                ctx->write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
             }
             base = (uint32_t)NVLOG_REGION_HEADER_SIZE;
         }
 
-        if (base > ctx->region_size || ctx->region_size - base < total)
-            return NVLOG_ERR_FULL;
-
-        if (base != ctx->write_ptr) {
-            uint32_t wrap_total = 0;
-            int rc = write_record_wire(ctx, ctx->write_ptr,
-                                       NVLOG_RECORD_TYPE_WRAP,
-                                       NVLOG_FLAGS_RING,
-                                       NVLOG_MODE_RING,
-                                       ctx->next_seq,
-                                       ctx->generation,
-                                       NULL,
-                                       0,
-                                       &wrap_total);
-            if (rc != NVLOG_OK) return (nvlog_status_t)rc;
-            ctx->padding_bytes += wrap_total;
+        if (ring_validate_window(ctx) != 0) return NVLOG_ERR_CORRUPT;
+        if (ctx->free_bytes < total) {
+            nvlog_status_t st = ring_retire_tail_to_free(ctx, total);
+            if (st != NVLOG_OK) return st;
+            new_tail = ctx->tail_ptr;
         }
+
+        if (base > data_limit || data_limit - base < total)
+            return NVLOG_ERR_FULL;
 
         {
             uint32_t written = 0;
@@ -985,19 +1033,23 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
                                        payload,
                                        payload_len,
                                        &written);
-            if (rc != NVLOG_OK) return (nvlog_status_t)rc;
+            if (rc != NVLOG_OK)
+                return (nvlog_status_t)rc;
             ctx->write_ptr = base + written;
-            if (ctx->write_ptr >= ctx->region_size)
+            if (ctx->write_ptr >= data_limit)
                 ctx->write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
         }
 
         ctx->tail_ptr = new_tail;
-        ctx->record_count = (ctx->record_count > evicted ? ctx->record_count - evicted : 0u) + 1u;
+        ctx->record_count++;
+        ctx->next_seq++;
         ctx->metadata_seq++;
         if (ctx->metadata_seq == 0) ctx->metadata_seq = 1u;
         ctx->mutation++;
-        if (ring_validate_window(ctx) != 0) return NVLOG_ERR_CORRUPT;
-        if (ring_publish_superblocks(ctx) != 0) return NVLOG_ERR_IO;
+        if (ring_validate_window(ctx) != 0)
+            return NVLOG_ERR_CORRUPT;
+        if (ring_publish_superblocks(ctx) != 0)
+            return NVLOG_ERR_IO;
         return NVLOG_OK;
     } else {
         uint32_t write_end = 0;
@@ -1009,16 +1061,69 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
 
     if (ctx->mode != NVLOG_MODE_RING) {
         uint32_t written = 0;
-        int rc = write_record_wire(ctx, ctx->write_ptr,
-                                   NVLOG_RECORD_TYPE_DATA,
-                                   NVLOG_FLAGS_LINEAR,
-                                   NVLOG_MODE_LINEAR,
-                                   ctx->next_seq,
-                                   ctx->generation,
-                                    payload,
-                                    payload_len,
-                                    &written);
-        if (rc != NVLOG_OK) return (nvlog_status_t)rc;
+        if (ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
+            int rc = write_record_wire(ctx, ctx->write_ptr,
+                                       NVLOG_RECORD_TYPE_DATA,
+                                       NVLOG_FLAGS_LINEAR,
+                                       NVLOG_MODE_LINEAR,
+                                       ctx->next_seq,
+                                       ctx->generation,
+                                       payload,
+                                       payload_len,
+                                       &written);
+            if (rc != NVLOG_OK) return (nvlog_status_t)rc;
+        } else {
+            nvlog_wire_rec_t hdr;
+            hdr.magic = NVLOG_RECORD_MAGIC;
+            hdr.type = NVLOG_RECORD_TYPE_DATA;
+            hdr.version = NVLOG_RECORD_VERSION;
+            hdr.flags = NVLOG_FLAGS_LINEAR;
+            hdr.mode = NVLOG_MODE_LINEAR;
+            hdr.reserved[0] = 0u;
+            hdr.reserved[1] = 0u;
+            hdr.reserved[2] = 0u;
+            hdr.generation = ctx->generation;
+            hdr.seq = ctx->next_seq;
+            hdr.payload_len = payload_len;
+            hdr.total_len = (uint32_t)(NVLOG_RECORD_OVERHEAD + payload_len);
+            hdr.alloc_len = total;
+            hdr.crc32 = 0;
+
+            uint8_t hdr_raw[NVLOG_HEADER_SIZE];
+            rec_encode(hdr_raw, &hdr);
+            hdr.crc32 = rec_header_crc(hdr_raw);
+            rec_encode(hdr_raw, &hdr);
+
+            uint32_t crc = crc32_update(0, hdr_raw, sizeof(hdr_raw));
+            if (payload_len > 0)
+                crc = crc32_update(crc, (const uint8_t *)payload, payload_len);
+
+            uint32_t base = ctx->write_ptr;
+            uint32_t payload_off = 0;
+            uint32_t crc_off = 0;
+            uint32_t commit_off = 0;
+            if (!nvlog_u32_add_checked(base, NVLOG_HEADER_SIZE, &payload_off))
+                return NVLOG_ERR_BOUNDS;
+            if (!nvlog_u32_add_checked(payload_off, payload_len, &crc_off))
+                return NVLOG_ERR_BOUNDS;
+            if (!nvlog_u32_add_checked(crc_off, sizeof(crc), &commit_off))
+                return NVLOG_ERR_BOUNDS;
+
+            uint8_t commit = 0xFFu;
+            if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0) return NVLOG_ERR_IO;
+            if (hal_write(ctx, base, hdr_raw, sizeof(hdr_raw)) != 0) return NVLOG_ERR_IO;
+            if (payload_len > 0)
+                if (hal_write(ctx, payload_off, payload, payload_len) != 0)
+                    return NVLOG_ERR_IO;
+            commit = 0x00u;
+            if (hal_write(ctx, crc_off, &crc, sizeof(crc)) != 0)
+                return NVLOG_ERR_IO;
+            if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0)
+                return NVLOG_ERR_IO;
+
+            written = total;
+        }
+
         ctx->write_ptr += written;
         ctx->next_seq++;
         ctx->mutation++;
@@ -1135,7 +1240,7 @@ nvlog_status_t nvlog_iter_next(nvlog_iter_t *it, nvlog_record_t *out)
             if (st != NVLOG_OK)
                 return st;
             it->cursor += total;
-            if (it->cursor >= ctx->region_size)
+            if (it->cursor >= ring_data_limit_bytes(ctx))
                 it->cursor = (uint32_t)NVLOG_REGION_HEADER_SIZE;
             if (hdr.type != NVLOG_RECORD_TYPE_DATA)
                 continue;
@@ -1285,7 +1390,6 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
     ctx->media_class = 0;
     ctx->program_unit = 1u;
     ctx->erased_value = 0xFFu;
-    ctx->session_id = g_nvlog_session_seed = next_session_value(g_nvlog_session_seed);
 
     nvlog_superblock_t sb;
     nvlog_status_t sb_status = load_current_superblock(ctx, &sb);
@@ -1304,10 +1408,24 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
     ctx->reserve_bytes = sb.reserve_bytes ? sb.reserve_bytes : NVLOG_RING_RESERVE_BYTES;
     ctx->ring_full = (ctx->free_bytes == 0);
     if (ctx->reserve_bytes != NVLOG_RING_RESERVE_BYTES) return NVLOG_ERR_UNSUPPORTED;
+    ctx->geometry_key = sb.feature_flags;
+    ctx->program_unit = sb.reserved0 ? (uint8_t)sb.reserved0 : 1u;
+    ctx->metadata_seq = next_session_value(sb.metadata_seq);
+    ctx->session_id = ctx->metadata_seq;
+    if (ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
+        if (ctx->program_unit != 1u &&
+            ctx->program_unit != 4u &&
+            ctx->program_unit != 8u &&
+            ctx->program_unit != 32u)
+            return NVLOG_ERR_UNSUPPORTED;
+    } else if (ctx->program_unit != 1u) {
+        return NVLOG_ERR_UNSUPPORTED;
+    }
     if (ctx->write_ptr < NVLOG_REGION_HEADER_SIZE || ctx->write_ptr > region_size) return NVLOG_ERR_CORRUPT;
     if (ctx->tail_ptr < NVLOG_REGION_HEADER_SIZE || ctx->tail_ptr > region_size) return NVLOG_ERR_CORRUPT;
     if (ctx->free_bytes > ring_usable_bytes(ctx)) return NVLOG_ERR_CORRUPT;
     if (ring_validate_window(ctx) != 0) return NVLOG_ERR_CORRUPT;
+    if (ring_publish_superblocks(ctx) != 0) return NVLOG_ERR_IO;
     ctx->mounted = 1;
     return NVLOG_OK;
 }

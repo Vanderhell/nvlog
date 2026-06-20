@@ -104,9 +104,9 @@ static void shadow_reset(shadow_state_t *s)
     s->next_seq = 0;
     s->write_ptr = NVLOG_REGION_HEADER_SIZE;
     s->tail_ptr = NVLOG_REGION_HEADER_SIZE;
-    s->reserve_bytes = NVLOG_RECORD_OVERHEAD;
+    s->reserve_bytes = NVLOG_RECORD_OVERHEAD + NVLOG_MAX_PAYLOAD;
     s->region_size = MODEL_SIZE;
-    s->free_bytes = MODEL_SIZE - NVLOG_REGION_HEADER_SIZE;
+    s->free_bytes = MODEL_SIZE - NVLOG_REGION_HEADER_SIZE - s->reserve_bytes;
 }
 
 static uint32_t rec_total(uint32_t len)
@@ -121,8 +121,8 @@ static void shadow_recalculate(shadow_state_t *s)
         used += rec_total(s->recs[i].len);
     s->record_count = (uint32_t)s->count;
     s->used_bytes = used;
-    s->free_bytes = (s->region_size - NVLOG_REGION_HEADER_SIZE > used)
-                  ? (s->region_size - NVLOG_REGION_HEADER_SIZE - used)
+    s->free_bytes = (s->region_size - NVLOG_REGION_HEADER_SIZE > s->reserve_bytes + used)
+                  ? (s->region_size - NVLOG_REGION_HEADER_SIZE - s->reserve_bytes - used)
                   : 0;
 }
 

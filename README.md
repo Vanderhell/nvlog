@@ -12,11 +12,13 @@ Current repository baseline:
 - compile-only example backend sources under `backends/hal_examples/`
 - public-header compile checks for C and C++
 
-The tree currently verifies the host test suites on Windows with CTest, including MSVC Release/Debug, strict warning-as-error variants, Win32 variants, and ClangCL strict builds. It does not claim physical hardware verification.
+Current release: `v1.0.5`.
 
-## Verified baseline
+The tree verifies the host test suites on Windows with CTest, including MSVC Release/Debug, strict warning-as-error variants, Win32 variants, and ClangCL strict builds. It does not claim physical hardware verification.
 
-- 8 CTest suites in the current tree
+## Verified Baseline
+
+- 10 CTest suites in the current tree
 - host Release and Debug builds with MSVC on Windows
 - strict warning-as-error Release and Debug builds with MSVC
 - Win32 Release and strict Release builds with MSVC
@@ -29,6 +31,8 @@ The tree currently verifies the host test suites on Windows with CTest, includin
 Current verification levels:
 
 - host-tested: POSIX model, flash simulator, core test suites, ring regression, randomized model
+- simulator-tested: NOR flash simulator
+- protocol-mock-tested: backend protocol suite
 - compile-verified: FRAM, EEPROM, SPI NOR, STM32F4, STM32L4, STM32H7, ESP-IDF partition adapter
 - hardware-verified: not verified
 
@@ -50,7 +54,7 @@ Debug uses the same steps with `build-debug`.
 
 ## Scope
 
-The repository is in active repair. Public claims about power-loss guarantees, flash support, hardware support, footprint, and release status should be treated as pending until they are re-verified in code and tests.
+Public claims about power-loss guarantees, flash support, hardware support, footprint, and release status should be read against the tests and build evidence in this tree.
 
 ## Evidence Matrix
 

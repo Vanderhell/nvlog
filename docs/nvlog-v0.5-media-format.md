@@ -4,7 +4,7 @@ This document describes the currently implemented v0.5 media encoding in this re
 
 ## Scope
 
-- Public API version: `1.0.1`
+- Public API version: `1.0.5`
 - Supported media classes:
   - byte-writable media
   - erase-before-write media
@@ -58,8 +58,8 @@ Validation rules:
 - `format_version` must equal `NVLOG_MEDIA_VERSION`
 - `mode` must be supported
 - `media_class` must match the mounted media contract
-- `reserved0` must be zero
-- `feature_flags` must be zero
+- `reserved0` stores the program unit for the mounted media
+- `feature_flags` stores the geometry key for the mounted media
 - `crc32` must match the CRC of bytes `0x00..0x37`
 - if both copies are valid, the newer generation and metadata sequence are selected using wrap-aware ordering
 
@@ -141,8 +141,9 @@ Ring mode recovery restores:
 
 Verified in this repository:
 
-- host-tested: POSIX host model, ring tests, randomized model
+- host-tested: POSIX host model, ring tests, randomized model, core tests, power-loss tests
 - simulator-tested: flash simulator
+- protocol-mock-tested: backend protocol suite
 - compile-verified: FRAM, EEPROM, SPI NOR, STM32F4, STM32L4, STM32H7, ESP-IDF partition adapter
 - hardware-verified: not verified
 

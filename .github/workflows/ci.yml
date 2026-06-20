@@ -7,51 +7,160 @@ on:
     branches: [ main, master ]
 
 jobs:
-
   gcc-linux:
-    name: GCC / Linux
+    name: GCC / Linux / Release-Debug
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Release, Debug]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  gcc-linux-strict:
+    name: GCC / Linux / Strict Warnings
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build-strict -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS='-Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion -Wshadow' -DCMAKE_CXX_FLAGS='-Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion -Wshadow'
+      - name: Build
+        run: cmake --build build-strict --parallel
+      - name: Test
+        run: ctest --test-dir build-strict --output-on-failure
 
-      - name: Build and test (CMake)
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
-          ctest --test-dir build -V --timeout 30
+  gcc-linux-32bit:
+    name: GCC / Linux / 32-bit ABI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install multilib
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib g++-multilib
+      - name: Configure
+        run: cmake -S . -B build-32 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS='-m32' -DCMAKE_CXX_FLAGS='-m32'
+      - name: Build
+        run: cmake --build build-32 --parallel
 
   clang-linux:
-    name: Clang / Linux
+    name: Clang / Linux / Release-Debug
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Release, Debug]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: CC=clang CXX=clang++ cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  clang-linux-asan:
+    name: Clang / Linux / ASan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Configure
+        run: CC=clang CXX=clang++ cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS='-fsanitize=address' -DCMAKE_CXX_FLAGS='-fsanitize=address' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address'
+      - name: Build
+        run: cmake --build build-asan --parallel
+      - name: Test
+        run: ctest --test-dir build-asan --output-on-failure
 
-      - name: Build and test (Clang)
-        run: |
-          CC=clang cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
-          ctest --test-dir build -V --timeout 30
-
-  gcc-macos:
-    name: GCC / macOS
-    runs-on: macos-latest
+  clang-linux-ubsan:
+    name: Clang / Linux / UBSan
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build and test
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
-          ctest --test-dir build -V --timeout 30
+      - name: Configure
+        run: CC=clang CXX=clang++ cmake -S . -B build-ubsan -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS='-fsanitize=undefined' -DCMAKE_CXX_FLAGS='-fsanitize=undefined' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=undefined'
+      - name: Build
+        run: cmake --build build-ubsan --parallel
+      - name: Test
+        run: ctest --test-dir build-ubsan --output-on-failure
 
   msvc-windows:
-    name: MSVC / Windows
+    name: MSVC / Windows / Release-Debug
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Release, Debug]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }}
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
+
+  msvc-windows-strict:
+    name: MSVC / Windows / /W4 /WX
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build-strict -DCMAKE_C_FLAGS='/W4 /WX' -DCMAKE_CXX_FLAGS='/W4 /WX'
+      - name: Build
+        run: cmake --build build-strict --config Release
+      - name: Test
+        run: ctest --test-dir build-strict -C Release --output-on-failure
 
-      - name: Build and test
-        run: |
-          cmake -B build
-          cmake --build build --config Release
-          ctest --test-dir build -C Release -V --timeout 30
+  consumers:
+    name: Consumers / C and C++
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build C consumer
+        run: cmake --build build --config Release --target compile_public_c
+      - name: Build C++ consumer
+        run: cmake --build build --config Release --target compile_public_cpp
+
+  backend-protocol:
+    name: Backend / Protocol Tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build --config Release --target test_backends
+      - name: Test
+        run: build\\Release\\test_backends.exe
+
+  deterministic-model:
+    name: Deterministic / Model Tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build --config Release --target test_model
+      - name: Test
+        run: build\\Release\\test_model.exe
+
+  failure-injection:
+    name: Failure Injection / Host
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build --config Release --target test_powerloss test_flash
+      - name: Test power-loss
+        run: build\\Release\\test_powerloss.exe
+      - name: Test flash recovery
+        run: build\\Release\\test_flash.exe

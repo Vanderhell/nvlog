@@ -38,6 +38,11 @@ static int g_fail = 0;
 #define REGION_SIZE   (4 * 4096u)   /* 4 sectors of 4KB */
 #define SECTOR_SIZE   4096u
 
+static uint32_t flash_geometry_key(uint32_t erase_size, uint32_t prog_size)
+{
+    return ((erase_size / 1024u) << 8) | (prog_size & 0xFFu);
+}
+
 /* ─── helpers ─────────────────────────────────────────────────── */
 
 static void fresh_sim(nvlog_flash_sim_ctx_t *sim, nvlog_hal_flash_t *flash)
@@ -67,7 +72,7 @@ static void test_fl01(void)
     CHECK(ctx.media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE);
     CHECK(ctx.program_unit == 1u);
     CHECK(ctx.erased_value == 0xFFu);
-    CHECK(ctx.geometry_key == ((SECTOR_SIZE << 16) | 1u));
+    CHECK(ctx.geometry_key == flash_geometry_key(SECTOR_SIZE, 1u));
 
     /* first 64 bytes = redundant A/B superblock pair */
     uint8_t sb0[NVLOG_SUPERBLOCK_SIZE];
@@ -195,7 +200,7 @@ static void test_fl06(void)
     nvlog_append(&ctx, "safe", 4);
 
     /* fail after header write, before CRC commit */
-    nvlog_flash_sim_inject_write_fail(&sim, 1);
+    nvlog_flash_sim_inject_write_fail(&sim, 0);
     nvlog_append(&ctx, "lost", 4);
     nvlog_flash_sim_inject_write_fail(&sim, -1);
 
@@ -322,7 +327,7 @@ static void test_fl11(void)
         CHECK(ctx.media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE);
         CHECK(ctx.program_unit == (uint8_t)units[i]);
         CHECK(ctx.erased_value == 0xFFu);
-        CHECK(ctx.geometry_key == ((SECTOR_SIZE << 16) | units[i]));
+        CHECK(ctx.geometry_key == flash_geometry_key(SECTOR_SIZE, units[i]));
         CHECK(nvlog_flash_verify_erased(&flash, REGION_SIZE) == NVLOG_OK);
 
         nvlog_flash_sim_close(&sim);
@@ -344,6 +349,83 @@ static void test_fl11(void)
     nvlog_flash_sim_close(&sim);
 }
 
+static void test_fl12(void)
+{
+    TEST("FL-12: partial flash program returns old-or-new state");
+
+    const uint32_t units[] = {1u, 4u, 8u, 32u};
+    const uint32_t old_len = 5u;
+    const uint32_t new_lens[] = {1u, 3u, 7u, 11u, 19u};
+    for (size_t u = 0; u < sizeof(units) / sizeof(units[0]); u++) {
+        for (size_t n = 0; n < sizeof(new_lens) / sizeof(new_lens[0]); n++) {
+            nvlog_flash_sim_ctx_t sim;
+            nvlog_hal_flash_t flash;
+            nvlog_flash_sim_cfg_t cfg = {0};
+            cfg.capacity = REGION_SIZE;
+            cfg.erased_value = 0xFFu;
+            cfg.erase_unit = SECTOR_SIZE;
+            cfg.program_unit = units[u];
+            cfg.program_alignment = units[u];
+            cfg.max_transfer = 0u;
+            cfg.sector_size = SECTOR_SIZE;
+            CHECK(nvlog_flash_sim_open_cfg(&sim, &flash, &cfg) == 0);
+
+            nvlog_ctx_t ctx;
+            CHECK(nvlog_flash_format(&ctx, &flash, REGION_SIZE) == NVLOG_OK);
+
+            uint8_t old_payload[64];
+            uint8_t new_payload[64];
+            uint32_t new_len = new_lens[n] + 1u;
+            if (new_len > sizeof(new_payload))
+                new_len = new_lens[n];
+            for (uint32_t i = 0; i < old_len; i++) old_payload[i] = (uint8_t)(0x10u + i);
+            for (uint32_t i = 0; i < new_len; i++) new_payload[i] = (uint8_t)(0x80u + i);
+
+            CHECK(nvlog_append(&ctx, old_payload, old_len) == NVLOG_OK);
+
+            uint32_t record_alloc = (uint32_t)((NVLOG_RECORD_OVERHEAD + new_len + (units[u] - 1u)) / units[u]) * units[u];
+            const uint32_t cuts[] = {0u, 1u, units[u] - 1u, units[u], units[u] + 1u, record_alloc - 1u, record_alloc};
+            for (size_t c = 0; c < sizeof(cuts) / sizeof(cuts[0]); c++) {
+                nvlog_flash_sim_reset(&sim);
+                CHECK(nvlog_flash_format(&ctx, &flash, REGION_SIZE) == NVLOG_OK);
+                CHECK(nvlog_append(&ctx, old_payload, old_len) == NVLOG_OK);
+                nvlog_flash_sim_inject_write_partial(&sim, (int32_t)cuts[c]);
+                nvlog_status_t st = nvlog_append(&ctx, new_payload, new_len);
+                nvlog_flash_sim_inject_write_partial(&sim, -1);
+
+                nvlog_ctx_t mounted;
+                CHECK(nvlog_mount(&mounted, &flash.base, REGION_SIZE) == NVLOG_OK);
+
+                uint32_t count = count_records_flash(&mounted);
+                CHECK(count == 1u || count == 2u);
+                if (count == 1u) {
+                    CHECK(st == NVLOG_ERR_IO || st == NVLOG_OK);
+                    nvlog_iter_t it;
+                    nvlog_record_t rec;
+                    CHECK(nvlog_iter_init(&it, &mounted) == NVLOG_OK);
+                    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_OK);
+                    uint8_t buf[64];
+                    CHECK(nvlog_read_payload(&mounted, &rec, buf, sizeof(buf)) == NVLOG_OK);
+                    CHECK(memcmp(buf, old_payload, old_len) == 0);
+                } else {
+                    nvlog_iter_t it;
+                    nvlog_record_t rec;
+                    CHECK(nvlog_iter_init(&it, &mounted) == NVLOG_OK);
+                    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_OK);
+                    uint8_t buf[64];
+                    CHECK(nvlog_read_payload(&mounted, &rec, buf, sizeof(buf)) == NVLOG_OK);
+                    CHECK(memcmp(buf, old_payload, old_len) == 0);
+                    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_OK);
+                    CHECK(nvlog_read_payload(&mounted, &rec, buf, sizeof(buf)) == NVLOG_OK);
+                    CHECK(memcmp(buf, new_payload, new_len) == 0);
+                    CHECK(st == NVLOG_OK || st == NVLOG_ERR_IO);
+                }
+            }
+            nvlog_flash_sim_close(&sim);
+        }
+    }
+}
+
 /* ─── main ────────────────────────────────────────────────────── */
 
 int main(void)
@@ -362,6 +444,7 @@ int main(void)
     test_fl09();
     test_fl10();
     test_fl11();
+    test_fl12();
 
     printf("\n=======================================\n");
     printf("PASSED: %d\n", g_pass);

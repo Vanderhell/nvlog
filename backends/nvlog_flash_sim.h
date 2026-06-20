@@ -73,8 +73,14 @@ int nvlog_flash_sim_open_cfg(nvlog_flash_sim_ctx_t *sim,
 /** Inject failure: writes fail after n write calls (-1 = disable) */
 void nvlog_flash_sim_inject_write_fail(nvlog_flash_sim_ctx_t *sim, int32_t n);
 
+/** Inject failure: writes truncate after n bytes in the next write call */
+void nvlog_flash_sim_inject_write_partial(nvlog_flash_sim_ctx_t *sim, int32_t bytes);
+
 /** Inject failure: erases fail after n erase calls (-1 = disable) */
 void nvlog_flash_sim_inject_erase_fail(nvlog_flash_sim_ctx_t *sim, int32_t n);
+
+/** Inject failure: erases truncate after n bytes in the next erase call */
+void nvlog_flash_sim_inject_erase_partial(nvlog_flash_sim_ctx_t *sim, int32_t bytes);
 
 /** Reset sim state (re-erase all sectors, clear counters) */
 void nvlog_flash_sim_reset(nvlog_flash_sim_ctx_t *sim);

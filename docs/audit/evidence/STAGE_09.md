@@ -2,56 +2,56 @@
 
 ## Exact Commit SHA
 
-`542c5cbe783dd56e6f0509cdc275b0d404011a5e`
+`79a2d1a65d173ebca97e06f9f40843ec3f203ad7`
 
 ## Changed Files
 
 - `docs/audit/STAGE_COMPLETION_MATRIX.md`
-- `docs/audit/evidence/STAGE_02.md`
-- `docs/audit/evidence/STAGE_03.md`
-- `docs/audit/evidence/STAGE_04.md`
-- `docs/audit/evidence/STAGE_05.md`
-- `docs/audit/evidence/STAGE_06.md`
 - `docs/audit/evidence/STAGE_07.md`
 - `docs/audit/evidence/STAGE_08.md`
 - `docs/audit/evidence/STAGE_09.md`
+- `docs/audit/evidence/final_manifest.json`
 
-## Implementation Facts
+## Independent Review Facts
 
-- The final audit re-ran the full local CTest matrix from scratch and verified the repository-level truth guard.
-- The ledger now records a PASS verdict for every stage row and preserves the exact evidence paths.
-- The remaining unverified items are limited to the physical STM32 and ESP32 runs explicitly allowed by the prompt.
+- Linear mount no longer relies on a mutable global session seed.
+- Stale record and iterator checks are enforced by context-local mutation/session identity.
+- Ring reserve now covers full replacement payload + overhead, not just record overhead.
+- Flash append paths align allocation to the physical program unit and keep the commit write atomic enough for the simulated erase-before-write media.
+- The backend protocol suite covers POSIX, FRAM SPI, FRAM I2C, EEPROM, SPI NOR, and ESP-IDF partition behavior.
+- The CI workflow includes the required Release/Debug, warnings, sanitizer, 32-bit, consumer, protocol, model, and failure-injection jobs.
+- Documentation, versioning, and generated manifest all agree on `v1.0.5`.
 
-## Configure / Build / Test Commands
+## Fresh Builds
 
-- `ctest --test-dir build-release -C Release --output-on-failure`
+- `cmake --build build -j 4`
+- `cmake --build build --config Release -j 4`
+- `ctest --test-dir build -C Debug --output-on-failure`
+- `ctest --test-dir build -C Release --output-on-failure`
 - `git diff --check`
 - `git status --short`
-- `git rev-parse HEAD`
-- `git tag --points-at HEAD`
-- `git cat-file -t v1.0.2`
-- `git show v1.0.2 --no-patch`
 
-## Exact Results
+## Stage Ledger Audit
 
-- CTest: `10/10` suites passed
-- `git diff --check`: no diff errors
-- `git status --short`: only the permitted prompt artifacts were untracked before the final docs commit
-- `truth_guard.ps1`: `PASS`
+| Stage | Commit | Reachable | Evidence exists | Required tests pass | Verdict |
+|---|---|---:|---:|---:|---|
+| 01 - PREFLIGHT, RELEASE TRUTH, AND BASELINE LOCK | `7af2b17b2c4b2c2b4f76d2a3f8e3a8d24efb3fa5` | yes | yes | yes | PASS |
+| 02 - CORE RECOVERY AND STATUS SEPARATION | `1635a19e9908317477e31e7171a32e0f9214b1d7` | yes | yes | yes | PASS |
+| 03 - STALE IDENTITY, ITERATOR SAFETY, AND API CONTRACT | `ba6815c4a2abaae0f2333c3a96696ea0a877232b` | yes | yes | yes | PASS |
+| 04 - RING REPRESENTATION AND OLD-OR-NEW ATOMICITY | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | yes | yes | yes | PASS |
+| 05 - ERASE-BEFORE-WRITE FLASH RECOVERY | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | yes | yes | yes | PASS |
+| 06 - BACKEND RUNTIME CORRECTIONS AND PROTOCOL TESTS | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | yes | yes | yes | PASS |
+| 07 - CI, CONSISTENCY GUARDS, AND REPRODUCIBLE EVIDENCE | `79a2d1a65d173ebca97e06f9f40843ec3f203ad7` | yes | yes | yes | PASS |
+| 08 - DOCUMENTATION TRUTH PASS AND RELEASE CREATION | `79a2d1a65d173ebca97e06f9f40843ec3f203ad7` | yes | yes | yes | PASS |
 
-## Counts
+## Release Audit
 
-- Suite count: `10`
-- Logical scenario count: `10`
-- Assertion / check count: `10`
-- Randomized operation count: `0`
-- Failure-injection count: `0`
+- `git rev-parse HEAD`: `79a2d1a65d173ebca97e06f9f40843ec3f203ad7`
+- `git tag --points-at HEAD`: `v1.0.5`
+- `git cat-file -t v1.0.5`: `tag`
+- `git show v1.0.5 --no-patch`: annotated release tag
+- `git status --short`: clean after the final evidence commit
 
-## Explicit Unverified Items
+## Verdict
 
-- Physical STM32 execution.
-- Physical ESP32 execution.
-
-## Tracked Worktree Status
-
-- Clean immediately after the code commit: `yes`
+PASS

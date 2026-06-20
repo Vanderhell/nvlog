@@ -1,7 +1,6 @@
 #include "nvlog_flash_sim.h"
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 static int sim_read(uint32_t addr, void *buf, uint32_t len, void *user)
 {
@@ -41,9 +40,6 @@ static int sim_write(uint32_t addr, const void *buf, uint32_t len, void *user)
         uint8_t next = src[i];
         if ((next & ~current) != 0) {
             s->bit_flip_violations++;
-            fprintf(stderr,
-                    "[nvlog_flash_sim] BIT FLIP VIOLATION at addr=0x%08X byte[%u]: current=0x%02X write=0x%02X\n",
-                    addr, i, current, next);
             return -1;
         }
         s->mem[addr + i] = (uint8_t)(current & next);
