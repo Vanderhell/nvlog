@@ -2,7 +2,7 @@
 
 ## Exact Commit SHA
 
-`ff68b4416d6cec8ca01b252b3522b1e48df24026`
+`542c5cbe783dd56e6f0509cdc275b0d404011a5e`
 
 ## Changed Files
 
@@ -21,13 +21,13 @@
 - `cmake --build build-release --config Release -j 4`
 - `cmd /c build-release\Release\test_model.exe > C:\tmp\test_model.out 2>&1`
 - `git tag --points-at HEAD`
-- `git cat-file -t v1.0.1`
-- `git show v1.0.1 --no-patch`
+- `git cat-file -t v1.0.2`
+- `git show v1.0.2 --no-patch`
 
 ## Exact Results
 
 - `test_model.exe`: `operations=30000`, `scenarios=30000`, `checks=382517`, `PASSED: 382517`, `FAILED: 0`
-- `v1.0.1` is still an annotated tag and was not moved
+- `v1.0.2` is an annotated tag and points at the audited HEAD
 
 ## Counts
 
