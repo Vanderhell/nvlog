@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    name: Windows / Release Package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $package = "nvlog-$tag-windows-release.zip"
+          if (Test-Path -LiteralPath $package) {
+            Remove-Item -LiteralPath $package -Force
+          }
+          $files = Get-ChildItem -LiteralPath build\Release -File | ForEach-Object { $_.FullName }
+          Compress-Archive -Path $files -DestinationPath $package -Force
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: nvlog-${{ github.ref_name }}-windows-release.zip

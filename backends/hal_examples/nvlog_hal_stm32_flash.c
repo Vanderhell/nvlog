@@ -254,10 +254,11 @@ static int stm32_flash_write(uint32_t addr, const void *buf, uint32_t len, void 
             word[i] = (i < n) ? src[i] : 0xFF;
 
         /* write 8 x 32-bit words */
-        for (int i = 0; i < 8; i++) {
+        for (uint32_t i = 0; i < 8u; i++) {
             uint32_t v;
-            memcpy(&v, word + i * 4, 4);
-            *(volatile uint32_t *)(abs + (uintptr_t)(i * 4u)) = v;
+            uintptr_t off = abs + (uintptr_t)(i * 4u);
+            memcpy(&v, word + i * 4u, 4u);
+            *(volatile uint32_t *)off = v;
         }
 
         if (flash_wait_ready() != 0) { FLASH_CR &= ~FLASH_CR_PG; return -1; }
