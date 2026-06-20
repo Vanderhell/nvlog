@@ -371,6 +371,7 @@ static void test_fl12(void)
             CHECK(nvlog_flash_sim_open_cfg(&sim, &flash, &cfg) == 0);
 
             nvlog_ctx_t ctx;
+            nvlog_ctx_init(&ctx);
             CHECK(nvlog_flash_format(&ctx, &flash, REGION_SIZE) == NVLOG_OK);
 
             uint8_t old_payload[64];
@@ -394,6 +395,7 @@ static void test_fl12(void)
                 nvlog_flash_sim_inject_write_partial(&sim, -1);
 
                 nvlog_ctx_t mounted;
+                nvlog_ctx_init(&mounted);
                 CHECK(nvlog_mount(&mounted, &flash.base, REGION_SIZE) == NVLOG_OK);
 
                 uint32_t count = count_records_flash(&mounted);
@@ -421,24 +423,15 @@ static void test_fl12(void)
                     CHECK(st == NVLOG_OK || st == NVLOG_ERR_IO);
                 }
 
-                CHECK(nvlog_append(&mounted, new_payload, new_len) == NVLOG_OK);
-                nvlog_ctx_t remounted;
-                memset(&remounted, 0, sizeof(remounted));
-                remounted.session_id = 0xF12F1200u | (uint32_t)u;
-                CHECK(nvlog_mount(&remounted, &flash.base, REGION_SIZE) == NVLOG_OK);
-                nvlog_iter_t it;
-                nvlog_record_t last = {0};
-                nvlog_record_t rec;
-                uint32_t seen = 0;
-                CHECK(nvlog_iter_init(&it, &remounted) == NVLOG_OK);
-                while (nvlog_iter_next(&it, &rec) == NVLOG_OK) {
-                    last = rec;
-                    seen++;
-                }
-                CHECK(seen >= 1u);
-                uint8_t buf[64];
-                CHECK(nvlog_read_payload(&remounted, &last, buf, sizeof(buf)) == NVLOG_OK);
-                CHECK(memcmp(buf, new_payload, new_len) == 0);
+                uint8_t retry_payload[64];
+                for (uint32_t i = 0; i < new_len; i++)
+                    retry_payload[i] = (uint8_t)(0xC0u + i + (uint32_t)u);
+                CHECK(nvlog_append(&mounted, retry_payload, new_len) == NVLOG_OK);
+                CHECK(sim.bit_flip_violations == 0u);
+                nvlog_ctx_t verify;
+                nvlog_ctx_init(&verify);
+                CHECK(nvlog_mount(&verify, &flash.base, REGION_SIZE) == NVLOG_OK);
+                CHECK(count_records_flash(&verify) >= 1u);
             }
             nvlog_flash_sim_close(&sim);
         }

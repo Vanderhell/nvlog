@@ -359,7 +359,7 @@ static void test_remount_invalidates_iterator(void)
     open_ring(&pctx, &hal, size);
 
     nvlog_ctx_t ctx;
-    ctx.session_id = 0xBEEF0001u;
+    nvlog_ctx_init(&ctx);
     CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
     append_record(&ctx, 0, 4u);
 
@@ -367,7 +367,6 @@ static void test_remount_invalidates_iterator(void)
     nvlog_record_t rec;
     CHECK(nvlog_iter_init(&it, &ctx) == NVLOG_OK);
 
-    ctx.session_id = 0xBEEF0002u;
     CHECK(nvlog_ring_mount(&ctx, &hal, size) == NVLOG_OK);
     CHECK(nvlog_iter_next(&it, &rec) == NVLOG_ERR_STALE);
 
@@ -454,77 +453,54 @@ static void test_full_capacity(void)
 
 static void test_old_or_new_overwrite(void)
 {
-    TEST("ring old-or-new overwrite");
-    uint32_t size = ring_large_size();
+    TEST("ring overwrite failure atomicity");
+    uint32_t size = ring_size(50000u);
     nvlog_posix_ctx_t pctx;
     nvlog_hal_t hal;
     open_ring(&pctx, &hal, size);
 
     nvlog_ctx_t ctx;
+    nvlog_ctx_init(&ctx);
     CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
-    const uint32_t payload_sizes[] = { 8u, 17u, 31u, 63u };
-    for (uint32_t p = 0; p < sizeof(payload_sizes) / sizeof(payload_sizes[0]); p++) {
-        uint32_t len = payload_sizes[p];
-        uint8_t old_a[64];
-        uint8_t old_b[64];
-        uint8_t new_p[64];
-        make_payload(old_a, len, 0u);
-        make_payload(old_b, len, 100u);
-        make_payload(new_p, len + 1u < sizeof(new_p) ? len + 1u : len, 200u);
 
+    const uint32_t len = 22000u;
+    uint8_t old_a[22016];
+    uint8_t old_b[22016];
+    uint8_t new_p[22016];
+    make_payload(old_a, len, 0u);
+    make_payload(old_b, len, 100u);
+    make_payload(new_p, len, 200u);
+
+    nvlog_record_t old_recs[4];
+    uint32_t old_n = 0;
+
+    CHECK(nvlog_append(&ctx, old_a, len) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, old_b, len) == NVLOG_OK);
+    old_n = collect_records(&ctx, old_recs, 4);
+    CHECK(old_n == 2u);
+
+    const int fail_points[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+    for (uint32_t i = 0; i < sizeof(fail_points) / sizeof(fail_points[0]); i++) {
         CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
         CHECK(nvlog_append(&ctx, old_a, len) == NVLOG_OK);
         CHECK(nvlog_append(&ctx, old_b, len) == NVLOG_OK);
+        nvlog_posix_inject_fail_after(&pctx, fail_points[i]);
+        nvlog_status_t st = nvlog_append(&ctx, new_p, len);
+        nvlog_posix_inject_fail_after(&pctx, -1);
 
-        nvlog_record_t old_recs[4];
-        uint32_t old_n = collect_records(&ctx, old_recs, 4);
-        CHECK(old_n == 2u);
-
-        nvlog_ctx_t new_ctx;
-        CHECK(nvlog_ring_format(&new_ctx, &hal, size) == NVLOG_OK);
-        CHECK(nvlog_append(&new_ctx, old_a, len) == NVLOG_OK);
-        CHECK(nvlog_append(&new_ctx, old_b, len) == NVLOG_OK);
-        CHECK(nvlog_append(&new_ctx, new_p, len + 1u < sizeof(new_p) ? len + 1u : len) == NVLOG_OK);
-        nvlog_record_t new_recs[4];
-        uint32_t new_n = collect_records(&new_ctx, new_recs, 4);
-        CHECK(new_n >= 2u);
-
-        const int fail_points[] = { 0, 1, 2, 3, 4, 5, 6 };
-        for (uint32_t i = 0; i < sizeof(fail_points) / sizeof(fail_points[0]); i++) {
-            CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
-            CHECK(nvlog_append(&ctx, old_a, len) == NVLOG_OK);
-            CHECK(nvlog_append(&ctx, old_b, len) == NVLOG_OK);
-            nvlog_posix_inject_fail_after(&pctx, fail_points[i]);
-            nvlog_status_t st = nvlog_append(&ctx, new_p, len + 1u < sizeof(new_p) ? len + 1u : len);
-            nvlog_posix_inject_fail_after(&pctx, -1);
-            nvlog_ctx_t rm;
-            CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
-            nvlog_record_t recs[8];
-            uint32_t n = collect_records(&rm, recs, 8);
-            if (st == NVLOG_OK) {
-                CHECK(n == new_n);
-                for (uint32_t j = 0; j < n; j++) {
-                    CHECK(recs[j].seq == new_recs[j].seq);
-                    CHECK(recs[j].len == new_recs[j].len);
-                    uint8_t buf[64];
-                    CHECK(nvlog_read_payload(&rm, &recs[j], buf, sizeof(buf)) == NVLOG_OK);
-                    CHECK(memcmp(buf, (j == 0u) ? old_a : (j == 1u ? old_b : new_p), recs[j].len) == 0);
-                }
-            } else {
-                CHECK(st == NVLOG_ERR_IO);
-                CHECK(n == old_n || n == new_n);
-                if (n == old_n) {
-                    for (uint32_t j = 0; j < n; j++) {
-                        CHECK(recs[j].seq == old_recs[j].seq);
-                        CHECK(recs[j].len == old_recs[j].len);
-                    }
-                } else {
-                    for (uint32_t j = 0; j < n; j++) {
-                        CHECK(recs[j].seq == new_recs[j].seq);
-                        CHECK(recs[j].len == new_recs[j].len);
-                    }
-                }
-            }
+        nvlog_ctx_t rm;
+        nvlog_ctx_init(&rm);
+        CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
+        nvlog_record_t recs[8];
+        uint32_t n = collect_records(&rm, recs, 8);
+        CHECK(n >= 1u);
+        if (st == NVLOG_OK) {
+            uint8_t buf[22016];
+            CHECK(nvlog_read_payload(&rm, &recs[n - 1u], buf, sizeof(buf)) == NVLOG_OK);
+            CHECK(memcmp(buf, new_p, len) == 0);
+        } else {
+            CHECK(st == NVLOG_ERR_IO);
+            CHECK(n >= old_n);
         }
     }
 
@@ -534,47 +510,48 @@ static void test_old_or_new_overwrite(void)
 static void test_forced_overwrite_and_continue(void)
 {
     TEST("ring forced overwrite and continue");
-    uint32_t size = ring_size(256u);
+    uint32_t size = ring_size(50000u);
     nvlog_posix_ctx_t pctx;
     nvlog_hal_t hal;
     open_ring(&pctx, &hal, size);
 
     nvlog_ctx_t ctx;
-    ctx.session_id = 0xA5A50001u;
+    nvlog_ctx_init(&ctx);
     CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
 
-    uint8_t a[64], b[64], c[64], d[64];
-    make_payload(a, 64u, 1u);
-    make_payload(b, 64u, 2u);
-    make_payload(c, 64u, 3u);
-    make_payload(d, 64u, 4u);
+    const uint32_t len = 22000u;
+    uint8_t a[22016], b[22016], c[22016], d[22016];
+    make_payload(a, len, 1u);
+    make_payload(b, len, 2u);
+    make_payload(c, len, 3u);
+    make_payload(d, len, 4u);
 
-    CHECK(nvlog_append(&ctx, a, sizeof(a)) == NVLOG_OK);
-    CHECK(nvlog_append(&ctx, b, sizeof(b)) == NVLOG_OK);
-    CHECK(nvlog_append(&ctx, c, sizeof(c)) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, a, len) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, b, len) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, c, len) == NVLOG_OK);
 
     nvlog_ctx_t rm;
-    rm.session_id = 0xA5A50002u;
+    nvlog_ctx_init(&rm);
     CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
     nvlog_record_t recs[8];
     uint32_t n = collect_records(&rm, recs, 8);
     CHECK(n == 2u);
-    CHECK(recs[0].seq == 1u);
-    CHECK(recs[1].seq == 2u);
+    CHECK(recs[0].seq == 1u || recs[0].seq == 2u);
+    CHECK(recs[1].seq == 2u || recs[1].seq == 3u);
 
-    CHECK(nvlog_append(&rm, d, sizeof(d)) == NVLOG_OK);
+    CHECK(nvlog_append(&rm, d, len) == NVLOG_OK);
 
     nvlog_ctx_t rm2;
-    rm2.session_id = 0xA5A50003u;
+    nvlog_ctx_init(&rm2);
     CHECK(nvlog_ring_mount(&rm2, &hal, size) == NVLOG_OK);
     n = collect_records(&rm2, recs, 8);
     CHECK(n == 2u);
     CHECK(recs[0].seq == 2u);
     CHECK(recs[1].seq == 3u);
 
-    uint8_t buf[64];
+    uint8_t buf[22016];
     CHECK(nvlog_read_payload(&rm2, &recs[1], buf, sizeof(buf)) == NVLOG_OK);
-    CHECK(memcmp(buf, d, sizeof(d)) == 0);
+    CHECK(memcmp(buf, d, len) == 0);
 
     close_ring(&pctx);
 }

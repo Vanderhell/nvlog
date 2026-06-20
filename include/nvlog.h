@@ -155,6 +155,14 @@ typedef struct {
     uint32_t      reserve_bytes; /* ring: physical reserve for atomic overwrite */
 } nvlog_ctx_t;
 
+/**
+ * nvlog_ctx_init() - zero a caller-owned context before use.
+ *
+ * This is optional, but it makes the initialization contract explicit.
+ * The library assigns session_id on successful format/mount.
+ */
+void nvlog_ctx_init(nvlog_ctx_t *ctx);
+
 /* --- record (returned by iterator) ---------------------------- */
 
 typedef struct {
