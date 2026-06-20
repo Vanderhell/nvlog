@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.6 - 2026-06-20
 
 - Added the missing user-facing documentation layer: getting started, cookbook, architecture, porting, power-loss contract, API reference, testing, capacity planning, RTOS integration, hardware validation, contributing, security, and support guides.
 - Added compile-verified example programs and README files under `examples/`.

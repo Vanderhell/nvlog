@@ -9,7 +9,7 @@
 
 It is designed for embedded and host-simulated media where record recovery, deterministic encoding, and power-loss behavior matter more than a generic logging API.
 
-Current release: `v1.0.5`.
+Current release: `v1.0.6`.
 
 ## Release Snapshot
 
@@ -158,18 +158,3 @@ Debug uses the same steps with `build-debug`.
 - [examples/minimal_linear/README.md](examples/minimal_linear/README.md)
 - [examples/minimal_ring/README.md](examples/minimal_ring/README.md)
 - [examples/posix_file/README.md](examples/posix_file/README.md)
-
-## Repository Topics
-
-Suggested GitHub topics:
-
-- `embedded`
-- `c99`
-- `persistent-storage`
-- `flash-memory`
-- `power-loss-recovery`
-- `ring-buffer`
-- `linear-log`
-- `non-volatile-memory`
-- `fram`
-- `eeprom`

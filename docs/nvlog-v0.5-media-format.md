@@ -4,7 +4,7 @@ This document describes the currently implemented v0.5 media encoding in this re
 
 ## Scope
 
-- Public API version: `1.0.5`
+- Public API version: `1.0.6`
 - Supported media classes:
   - byte-writable media
   - erase-before-write media
