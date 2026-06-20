@@ -205,8 +205,9 @@ nvlog_status_t nvlog_format(nvlog_ctx_t *ctx,
 /**
  * nvlog_mount() — mount an existing region.
  *
- * Scans NVM, finds last valid record, restores write pointer
- * and sequence number. Must be called before append/iter.
+ * Read-only recovery scan: finds the last valid record, restores write pointer
+ * and sequence number, and refreshes the in-memory session identity.
+ * Must be called before append/iter.
  *
  * On first boot with fresh NVM: call nvlog_format() first.
  * On any subsequent boot: call nvlog_mount().
@@ -287,8 +288,8 @@ nvlog_status_t nvlog_ring_format(nvlog_ctx_t       *ctx,
 /**
  * nvlog_ring_mount() — recover a ring-mode region after reset.
  *
- * Restores the latest committed ring state, including head/tail/write
- * positions, live counts, and next sequence.
+ * Read-only recovery scan that restores the latest committed ring state,
+ * including head/tail/write positions, live counts, and next sequence.
  *
  * Returns NVLOG_ERR_CORRUPT for a corrupt committed ring image.
  * Returns NVLOG_ERR_UNSUPPORTED for a mismatched version or mode.

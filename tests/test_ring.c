@@ -595,6 +595,28 @@ static void test_forced_overwrite_and_continue(void)
     close_ring(&pctx);
 }
 
+static void test_ring_mount_is_read_only(void)
+{
+    TEST("ring mount is read-only");
+    uint32_t size = ring_large_size();
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t hal;
+    open_ring(&pctx, &hal, size);
+
+    nvlog_ctx_t ctx;
+    nvlog_ctx_init(&ctx);
+    CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "boot", 4u) == NVLOG_OK);
+
+    nvlog_posix_inject_fail_after(&pctx, 0);
+    nvlog_ctx_t rm;
+    nvlog_ctx_init(&rm);
+    CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
+    nvlog_posix_inject_fail_after(&pctx, -1);
+
+    close_ring(&pctx);
+}
+
 int main(void)
 {
     printf("nvlog ring tests\n");
@@ -613,6 +635,7 @@ int main(void)
     test_remount_invalidates_iterator();
     test_stale_descriptor();
     test_forced_overwrite_and_continue();
+    test_ring_mount_is_read_only();
     test_sequence_wraparound();
     test_full_capacity();
     test_old_or_new_overwrite();

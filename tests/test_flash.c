@@ -131,6 +131,8 @@ static void test_fl03(void)
 
     /* mount in new ctx */
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
+    nvlog_ctx_init(&ctx2);
     CHECK(nvlog_mount(&ctx2, &flash.base, REGION_SIZE) == NVLOG_OK);
     CHECK(count_records_flash(&ctx2) == 2);
 
@@ -175,6 +177,8 @@ static void test_fl05(void)
 
     /* re-format */
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
+    nvlog_ctx_init(&ctx2);
     CHECK(nvlog_flash_format(&ctx2, &flash, REGION_SIZE) == NVLOG_OK);
 
     /* verify no records */
@@ -205,6 +209,8 @@ static void test_fl06(void)
     nvlog_flash_sim_inject_write_fail(&sim, -1);
 
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
+    nvlog_ctx_init(&ctx2);
     CHECK(nvlog_mount(&ctx2, &flash.base, REGION_SIZE) == NVLOG_OK);
     CHECK(count_records_flash(&ctx2) == 1);
 
@@ -228,6 +234,8 @@ static void test_fl07(void)
 
     /* mount should fail — no valid region header */
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
+    nvlog_ctx_init(&ctx2);
     CHECK(nvlog_mount(&ctx2, &flash.base, REGION_SIZE) == NVLOG_ERR_CORRUPT);
 
     nvlog_flash_sim_close(&sim);
@@ -296,6 +304,8 @@ static void test_fl10(void)
 
     /* mount and verify count matches */
     nvlog_ctx_t ctx2;
+    nvlog_ctx_init(&ctx2);
+    nvlog_ctx_init(&ctx2);
     nvlog_mount(&ctx2, &flash.base, REGION_SIZE);
     CHECK(count_records_flash(&ctx2) == written);
 

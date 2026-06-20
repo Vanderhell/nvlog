@@ -20,8 +20,8 @@ Returns:
 
 Mounts an existing linear region and restores the write pointer.
 
-Successful remounts refresh the session identity so old iterators and record
-snapshots become stale.
+Mount is read-only. Successful remounts refresh the in-memory session identity
+so old iterators and record snapshots become stale.
 
 Returns `NVLOG_ERR_INCOMPLETE` only internally during recovery scanning; the
 public API returns the mapped status.
@@ -75,7 +75,8 @@ Returns:
 Formats ring mode for byte-writable media.
 
 ### `nvlog_ring_mount()`
-Restores ring state after reset.
+Restores ring state after reset. Mount is read-only and refreshes the
+in-memory session identity only.
 
 ### `nvlog_ring_count()`
 Returns the count of valid records in ring mode.

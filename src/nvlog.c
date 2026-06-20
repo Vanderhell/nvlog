@@ -75,7 +75,6 @@ typedef struct {
 static int hal_read(nvlog_ctx_t *ctx, uint32_t addr, void *buf, uint32_t len);
 static int hal_write(nvlog_ctx_t *ctx, uint32_t addr, const void *buf, uint32_t len);
 static int ring_publish_superblocks(nvlog_ctx_t *ctx);
-static int linear_publish_superblocks(nvlog_ctx_t *ctx);
 static int ring_validate_window(nvlog_ctx_t *ctx);
 
 typedef enum {
@@ -467,33 +466,6 @@ static int ring_publish_superblocks(nvlog_ctx_t *ctx)
         .magic = NVLOG_MEDIA_MAGIC,
         .format_version = NVLOG_MEDIA_VERSION,
         .mode = NVLOG_MODE_RING,
-        .media_class = ctx->media_class,
-        .region_size = ctx->region_size,
-        .generation = ctx->generation,
-        .metadata_seq = ctx->metadata_seq,
-        .write_ptr = ctx->write_ptr,
-        .tail_ptr = ctx->tail_ptr,
-        .next_seq = ctx->next_seq,
-        .record_count = ctx->record_count,
-        .used_bytes = ctx->used_bytes,
-        .free_bytes = ctx->free_bytes,
-        .padding_bytes = ctx->padding_bytes,
-        .reserve_bytes = ctx->reserve_bytes,
-        .feature_flags = ctx->geometry_key,
-        .reserved0 = ctx->program_unit,
-        .crc32 = 0,
-    };
-    if (sb_write(ctx, 0, &sb) != 0) return -1;
-    if (sb_write(ctx, NVLOG_SUPERBLOCK_SIZE, &sb) != 0) return -1;
-    return 0;
-}
-
-static int linear_publish_superblocks(nvlog_ctx_t *ctx)
-{
-    nvlog_superblock_t sb = {
-        .magic = NVLOG_MEDIA_MAGIC,
-        .format_version = NVLOG_MEDIA_VERSION,
-        .mode = NVLOG_MODE_LINEAR,
         .media_class = ctx->media_class,
         .region_size = ctx->region_size,
         .generation = ctx->generation,
@@ -963,17 +935,15 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
 {
     if (!ctx || !hal || !hal->read || !hal->write)
         return NVLOG_ERR_PARAM;
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->hal         = *hal;
+    ctx->hal = *hal;
     ctx->region_size = region_size;
-    ctx->write_ptr   = (uint32_t)NVLOG_REGION_HEADER_SIZE;
-    ctx->tail_ptr    = (uint32_t)NVLOG_REGION_HEADER_SIZE;
-    ctx->mode        = NVLOG_MODE_LINEAR;
-    ctx->used_bytes  = 0;
-    ctx->free_bytes  = region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    ctx->write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    ctx->tail_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    ctx->mode = NVLOG_MODE_LINEAR;
+    ctx->used_bytes = 0;
+    ctx->free_bytes = region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE;
     ctx->padding_bytes = 0;
     ctx->reserve_bytes = 0;
-    ctx->mutation    = 1;
     ctx->geometry_key = 0;
     ctx->media_class = 0;
     ctx->program_unit = 1u;
@@ -989,7 +959,7 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     ctx->metadata_seq = next_session_value(sb.metadata_seq);
     if (ctx->metadata_seq == 0) ctx->metadata_seq = 1u;
     ctx->session_id = ctx->metadata_seq;
-    ctx->mutation = ctx->metadata_seq;
+    ctx->mutation = next_session_value(ctx->mutation);
     ctx->geometry_key = sb.feature_flags;
     ctx->program_unit = sb.reserved0 ? (uint8_t)sb.reserved0 : 1u;
     if (ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
@@ -1038,8 +1008,6 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     ctx->used_bytes = ctx->write_ptr - (uint32_t)NVLOG_REGION_HEADER_SIZE;
     ctx->free_bytes = ctx->region_size - ctx->write_ptr;
     ctx->record_count = record_count;
-    if (linear_publish_superblocks(ctx) != 0)
-        return NVLOG_ERR_IO;
 
     ctx->mounted = 1;
     return NVLOG_OK;
@@ -1512,7 +1480,6 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
     if (ctx->tail_ptr < NVLOG_REGION_HEADER_SIZE || ctx->tail_ptr > region_size) return NVLOG_ERR_CORRUPT;
     if (ctx->free_bytes > ring_usable_bytes(ctx)) return NVLOG_ERR_CORRUPT;
     if (ring_validate_window(ctx) != 0) return NVLOG_ERR_CORRUPT;
-    if (ring_publish_superblocks(ctx) != 0) return NVLOG_ERR_IO;
     ctx->mounted = 1;
     return NVLOG_OK;
 }

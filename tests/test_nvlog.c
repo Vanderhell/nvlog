@@ -225,6 +225,27 @@ static void test_linear_remount_invalidates_iterator(void)
     nvlog_posix_close(&pctx);
 }
 
+static void test_linear_mount_is_read_only(void)
+{
+    TEST("linear mount is read-only");
+
+    nvlog_ctx_t       ctx;
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t       hal;
+    make_ctx(&ctx, &pctx, &hal);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "A", 1) == NVLOG_OK);
+
+    nvlog_posix_inject_fail_after(&pctx, 0);
+    nvlog_ctx_t mounted;
+    nvlog_ctx_init(&mounted);
+    CHECK(nvlog_mount(&mounted, &hal, NVM_SIZE) == NVLOG_OK);
+    nvlog_posix_inject_fail_after(&pctx, -1);
+
+    nvlog_posix_close(&pctx);
+}
+
 /* ─── test 5: power-loss during append ───────────────────────── */
 
 static void test_power_loss(void)
@@ -401,6 +422,7 @@ static void test_read_failures_and_large_buffers(void)
 
     nvlog_posix_inject_read_fail_after(&pctx, 0);
     nvlog_ctx_t mount_ctx;
+    nvlog_ctx_init(&mount_ctx);
     CHECK(nvlog_mount(&mount_ctx, &hal, NVM_SIZE) == NVLOG_ERR_IO);
     nvlog_posix_inject_read_fail_after(&pctx, -1);
 
@@ -484,6 +506,7 @@ int main(void)
     test_corrupt_crc();
     test_mount_recovery();
     test_linear_remount_invalidates_iterator();
+    test_linear_mount_is_read_only();
     test_power_loss();
     test_full();
     test_stats();

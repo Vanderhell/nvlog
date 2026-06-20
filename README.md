@@ -11,8 +11,9 @@ It is designed for embedded and host-simulated media where record recovery, dete
 
 Current development version: `v1.0.6`.
 
-The public GitHub release tag is not yet published, so treat this tree as the
-development head until the release is pushed.
+The public release tag is published. The GitHub Release object and any packaged
+assets are still pending, so treat this tree as the tagged development head
+until the release page is created.
 
 ## Development Snapshot
 
