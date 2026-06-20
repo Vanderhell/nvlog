@@ -3,11 +3,11 @@
 | Stage | Status | Commit | Required tests | Evidence file | Remaining limits |
 |---|---|---|---|---|---|
 | 01 - PREFLIGHT, RELEASE TRUTH, AND BASELINE LOCK | PASS | `7af2b17b2c4b2c2b4f76d2a3f8e3a8d24efb3fa5` | truth guard direct; truth guard via CTest; `git diff --check` | `docs/audit/evidence/STAGE_01.md` | Physical STM32 and ESP32 remain not hardware-verified. |
-| 02 - CORE RECOVERY AND STATUS SEPARATION | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
-| 03 - STALE IDENTITY, ITERATOR SAFETY, AND API CONTRACT | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
-| 04 - RING REPRESENTATION AND OLD-OR-NEW ATOMICITY | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
-| 05 - ERASE-BEFORE-WRITE FLASH RECOVERY | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
-| 06 - BACKEND RUNTIME CORRECTIONS AND PROTOCOL TESTS | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
-| 07 - CI, CONSISTENCY GUARDS, AND REPRODUCIBLE EVIDENCE | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
-| 08 - DOCUMENTATION TRUTH PASS AND RELEASE CREATION | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
-| 09 - FINAL INDEPENDENT AUDIT GATE | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
+| 02 - CORE RECOVERY AND STATUS SEPARATION | PASS | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | `test_nvlog` / `suite_v01`; `ctest --test-dir build-release -C Release --output-on-failure` | `docs/audit/evidence/STAGE_02.md` | Physical STM32 and ESP32 remain not hardware-verified. |
+| 03 - STALE IDENTITY, ITERATOR SAFETY, AND API CONTRACT | PASS | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | `test_powerloss` / `suite_v02` and `suite_v03`; `ctest --test-dir build-release -C Release --output-on-failure` | `docs/audit/evidence/STAGE_03.md` | Physical STM32 and ESP32 remain not hardware-verified. |
+| 04 - RING REPRESENTATION AND OLD-OR-NEW ATOMICITY | PASS | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | `test_ring` / `suite_v04`; `ctest --test-dir build-release -C Release --output-on-failure` | `docs/audit/evidence/STAGE_04.md` | Physical STM32 and ESP32 remain not hardware-verified. |
+| 05 - ERASE-BEFORE-WRITE FLASH RECOVERY | PASS | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | `test_flash` / `suite_v05`; `ctest --test-dir build-release -C Release --output-on-failure` | `docs/audit/evidence/STAGE_05.md` | Physical STM32 and ESP32 remain not hardware-verified. |
+| 06 - BACKEND RUNTIME CORRECTIONS AND PROTOCOL TESTS | PASS | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | `test_backends` / `suite_v09`; `ctest --test-dir build-release -C Release --output-on-failure` | `docs/audit/evidence/STAGE_06.md` | Physical STM32 and ESP32 remain not hardware-verified. |
+| 07 - CI, CONSISTENCY GUARDS, AND REPRODUCIBLE EVIDENCE | PASS | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | `tools/truth_guard.ps1`; `git diff --check`; `ctest --test-dir build-release -C Release --output-on-failure` | `docs/audit/evidence/STAGE_07.md` | Physical STM32 and ESP32 remain not hardware-verified. |
+| 08 - DOCUMENTATION TRUTH PASS AND RELEASE CREATION | PASS | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | `test_model` / `suite_v08`; release tag inspection (`git tag --points-at HEAD`, `git cat-file -t`, `git show`) | `docs/audit/evidence/STAGE_08.md` | Physical STM32 and ESP32 remain not hardware-verified. |
+| 09 - FINAL INDEPENDENT AUDIT GATE | PASS | `ff68b4416d6cec8ca01b252b3522b1e48df24026` | `ctest --test-dir build-release -C Release --output-on-failure`; `git diff --check`; `git status --short` | `docs/audit/evidence/STAGE_09.md` | Physical STM32 and ESP32 remain not hardware-verified. |
