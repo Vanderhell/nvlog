@@ -74,6 +74,7 @@ typedef struct {
 static int hal_read(nvlog_ctx_t *ctx, uint32_t addr, void *buf, uint32_t len);
 static int hal_write(nvlog_ctx_t *ctx, uint32_t addr, const void *buf, uint32_t len);
 static int ring_publish_superblocks(nvlog_ctx_t *ctx);
+static int ring_validate_window(nvlog_ctx_t *ctx);
 
 typedef enum {
     NVLOG_VERIFY_VALID = 0,
@@ -441,6 +442,52 @@ static int ring_publish_superblocks(nvlog_ctx_t *ctx)
 static uint32_t ring_count_records(const nvlog_ctx_t *ctx)
 {
     return ctx ? ctx->record_count : 0;
+}
+
+static uint32_t ring_normalize_tail_cursor(const nvlog_ctx_t *ctx, uint32_t cursor)
+{
+    if (!ctx) return cursor;
+    if (cursor != (uint32_t)NVLOG_REGION_HEADER_SIZE &&
+        cursor < ctx->region_size &&
+        ctx->write_ptr < cursor &&
+        ctx->region_size - cursor < NVLOG_RECORD_OVERHEAD)
+        return (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    return cursor;
+}
+
+static nvlog_status_t ring_retire_tail_to_free(nvlog_ctx_t *ctx, uint32_t required_free)
+{
+    if (!ctx) return NVLOG_ERR_PARAM;
+
+    while (ctx->free_bytes < required_free && ctx->record_count > 0) {
+        ctx->tail_ptr = ring_normalize_tail_cursor(ctx, ctx->tail_ptr);
+        nvlog_wire_rec_t hdr;
+        uint32_t rec_total = 0;
+        nvlog_verify_result_t vr = verify_record(ctx, ctx->tail_ptr, &hdr, &rec_total, NULL);
+        nvlog_status_t st = verify_result_status(vr);
+        if (st != NVLOG_OK)
+            return st;
+
+        if (rec_total == 0)
+            return NVLOG_ERR_CORRUPT;
+
+        ctx->tail_ptr += rec_total;
+        if (ctx->tail_ptr >= ctx->region_size)
+            ctx->tail_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
+        ctx->tail_ptr = ring_normalize_tail_cursor(ctx, ctx->tail_ptr);
+
+        if (hdr.type == NVLOG_RECORD_TYPE_DATA) {
+            if (ctx->record_count > 0)
+                ctx->record_count--;
+            if (ctx->used_bytes >= rec_total)
+                ctx->used_bytes -= rec_total;
+        }
+
+        if (ring_validate_window(ctx) != 0)
+            return NVLOG_ERR_CORRUPT;
+    }
+
+    return ring_validate_window(ctx) == 0 ? NVLOG_OK : NVLOG_ERR_CORRUPT;
 }
 
 static int ring_validate_window(nvlog_ctx_t *ctx)
@@ -842,14 +889,15 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
 
     uint32_t payload_len = (uint32_t)len;
     uint32_t total = rec_total_bytes(payload_len);
-    uint32_t evicted = 0;
 
     if (ctx->mode == NVLOG_MODE_RING) {
         uint32_t capacity = ring_capacity_bytes(ctx);
         uint32_t usable = ring_usable_bytes(ctx);
         uint32_t base = ctx->write_ptr;
+        uint32_t remaining = 0;
         uint32_t new_tail = ctx->tail_ptr;
         uint32_t retired = 0;
+        uint32_t evicted = 0;
         uint32_t occupied_live = 0;
 
         if (capacity == 0 || usable == 0) return NVLOG_ERR_FULL;
@@ -862,7 +910,7 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
             uint32_t cursor = ctx->tail_ptr;
             while (retired < retire_bytes && evicted <= ctx->record_count) {
                 if (cursor != (uint32_t)NVLOG_REGION_HEADER_SIZE &&
-                    (cursor > ctx->region_size || ctx->region_size - cursor < NVLOG_RECORD_OVERHEAD) &&
+                    cursor + NVLOG_RECORD_OVERHEAD > ctx->region_size &&
                     ctx->write_ptr < cursor) {
                     uint32_t gap = ctx->region_size - cursor;
                     retired += gap;
@@ -886,7 +934,7 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
         }
 
         if (base > ctx->region_size || ctx->region_size - base < total) {
-            uint32_t remaining = ctx->region_size - base;
+            remaining = ctx->region_size - base;
             if (remaining > 0 && remaining < NVLOG_RECORD_OVERHEAD) {
                 ctx->padding_bytes += remaining;
                 ctx->write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
@@ -934,9 +982,9 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
                                        NVLOG_MODE_RING,
                                        ctx->next_seq,
                                        ctx->generation,
-                                        payload,
-                                        payload_len,
-                                        &written);
+                                       payload,
+                                       payload_len,
+                                       &written);
             if (rc != NVLOG_OK) return (nvlog_status_t)rc;
             ctx->write_ptr = base + written;
             if (ctx->write_ptr >= ctx->region_size)
@@ -1030,12 +1078,6 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
 
     /* KEY: normalize write_ptr — must never equal region_size in ring mode */
     normalize_write_ptr(ctx);
-
-    if (ctx->mode == NVLOG_MODE_RING) {
-        ctx->record_count = (ctx->record_count > evicted)
-                            ? ctx->record_count - evicted : 0;
-        ctx->record_count++;
-    }
 
     return NVLOG_OK;
 }

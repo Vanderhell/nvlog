@@ -68,6 +68,7 @@ add_executable(test_wire       tests/test_wire.c)
 add_executable(compile_public_c tests/compile_public_c.c)
 add_executable(compile_public_cpp tests/compile_public_cpp.cpp)
 add_executable(test_model       tests/test_model.c)
+add_executable(test_backends    tests/test_backends.c)
 
 foreach(t test_nvlog test_powerloss test_ring)
     target_include_directories(${t} PRIVATE include backends)
@@ -89,6 +90,16 @@ target_link_libraries(compile_public_cpp nvlog)
 target_include_directories(test_model PRIVATE include backends)
 target_link_libraries(test_model nvlog nvlog_posix)
 
+target_include_directories(test_backends PRIVATE include backends backends/hal_examples)
+target_link_libraries(test_backends
+    nvlog
+    nvlog_posix
+    nvlog_hal_fram_example
+    nvlog_hal_eeprom_example
+    nvlog_hal_nor_spi_example
+    nvlog_espidf_partition_example
+)
+
 enable_testing()
 add_test(NAME truth_guard COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${CMAKE_SOURCE_DIR}/tools/truth_guard.ps1)
 add_test(NAME suite_v01 COMMAND test_nvlog)
@@ -99,6 +110,7 @@ add_test(NAME suite_v05 COMMAND test_wire)
 add_test(NAME suite_v06 COMMAND compile_public_c)
 add_test(NAME suite_v07 COMMAND compile_public_cpp)
 add_test(NAME suite_v08 COMMAND test_model)
+add_test(NAME suite_v09 COMMAND test_backends)
 
-set_tests_properties(truth_guard suite_v01 suite_v02 suite_v03 suite_v04 suite_v05 suite_v06 suite_v07 suite_v08
+set_tests_properties(truth_guard suite_v01 suite_v02 suite_v03 suite_v04 suite_v05 suite_v06 suite_v07 suite_v08 suite_v09
     PROPERTIES TIMEOUT 30)
