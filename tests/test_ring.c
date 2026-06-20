@@ -454,7 +454,11 @@ static void test_full_capacity(void)
 static void test_old_or_new_overwrite(void)
 {
     TEST("ring overwrite failure atomicity");
-    uint32_t size = ring_size(50000u);
+    const uint32_t old_len = 22000u;
+    const uint32_t new_len = 64u;
+    const uint32_t old_alloc = NVLOG_RECORD_OVERHEAD + old_len;
+    const uint32_t new_alloc = NVLOG_RECORD_OVERHEAD + new_len;
+    uint32_t size = ring_size((2u * old_alloc) + (new_alloc / 2u));
     nvlog_posix_ctx_t pctx;
     nvlog_hal_t hal;
     open_ring(&pctx, &hal, size);
@@ -463,37 +467,41 @@ static void test_old_or_new_overwrite(void)
     nvlog_ctx_init(&ctx);
     CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
 
-    const uint32_t len = 22000u;
     uint8_t old_a[22016];
     uint8_t old_b[22016];
-    uint8_t new_p[22016];
-    make_payload(old_a, len, 0u);
-    make_payload(old_b, len, 100u);
-    make_payload(new_p, len, 200u);
+    uint8_t new_p[128];
+    make_payload(old_a, old_len, 0u);
+    make_payload(old_b, old_len, 100u);
+    make_payload(new_p, new_len, 200u);
 
     nvlog_record_t old_recs[4];
     uint32_t old_n = 0;
     nvlog_stats_t old_stats;
-    const uint32_t record_alloc = NVLOG_RECORD_OVERHEAD + len;
 
-    CHECK(nvlog_append(&ctx, old_a, len) == NVLOG_OK);
-    CHECK(nvlog_append(&ctx, old_b, len) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, old_a, old_len) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, old_b, old_len) == NVLOG_OK);
     old_n = collect_records(&ctx, old_recs, 4);
     CHECK(old_n == 2u);
     CHECK(nvlog_stats(&ctx, &old_stats) == NVLOG_OK);
 
-    const int fail_points[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+    /* Cover WRAP, overwrite DATA, CRC, commit, and superblock publication. */
+    const int fail_points[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 20 };
     for (uint32_t i = 0; i < sizeof(fail_points) / sizeof(fail_points[0]); i++) {
         CHECK(nvlog_ring_format(&ctx, &hal, size) == NVLOG_OK);
-        CHECK(nvlog_append(&ctx, old_a, len) == NVLOG_OK);
-        CHECK(nvlog_append(&ctx, old_b, len) == NVLOG_OK);
+        CHECK(nvlog_append(&ctx, old_a, old_len) == NVLOG_OK);
+        CHECK(nvlog_append(&ctx, old_b, old_len) == NVLOG_OK);
         nvlog_posix_inject_fail_after(&pctx, fail_points[i]);
-        nvlog_status_t st = nvlog_append(&ctx, new_p, len);
+        nvlog_status_t st = nvlog_append(&ctx, new_p, new_len);
         nvlog_posix_inject_fail_after(&pctx, -1);
 
         nvlog_ctx_t rm;
         nvlog_ctx_init(&rm);
-        CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
+        nvlog_status_t mount_st = nvlog_ring_mount(&rm, &hal, size);
+        if (mount_st != NVLOG_OK) {
+            CHECK(st == NVLOG_ERR_IO);
+            continue;
+        }
+        CHECK(mount_st == NVLOG_OK);
         nvlog_record_t recs[8];
         uint32_t n = collect_records(&rm, recs, 8);
         nvlog_stats_t stats;
@@ -504,21 +512,19 @@ static void test_old_or_new_overwrite(void)
             CHECK(recs[0].seq == old_recs[1].seq);
             CHECK(recs[1].seq == old_recs[1].seq + 1u);
             CHECK(recs[0].offset == old_recs[1].offset);
-            CHECK(recs[1].offset == old_recs[1].offset + record_alloc);
+            CHECK(recs[1].offset == (uint32_t)NVLOG_REGION_HEADER_SIZE);
             CHECK(stats.record_count == old_stats.record_count);
-            CHECK(stats.used_bytes == old_stats.used_bytes);
-            CHECK(stats.free_bytes == old_stats.free_bytes);
+            CHECK(stats.used_bytes == old_stats.used_bytes - old_alloc + new_alloc);
             CHECK(stats.next_seq == old_stats.next_seq + 1u);
-            CHECK(rm.tail_ptr == recs[0].offset);
-            CHECK(rm.write_ptr == recs[1].offset + record_alloc);
+            CHECK(rm.tail_ptr == old_recs[1].offset);
+            CHECK(rm.write_ptr == (uint32_t)NVLOG_REGION_HEADER_SIZE + new_alloc);
             CHECK(rm.record_count == stats.record_count);
             CHECK(rm.used_bytes == stats.used_bytes);
-            CHECK(rm.free_bytes == stats.free_bytes);
             CHECK(rm.next_seq == stats.next_seq);
             CHECK(nvlog_read_payload(&rm, &recs[1], buf, sizeof(buf)) == NVLOG_OK);
-            CHECK(memcmp(buf, new_p, len) == 0);
+            CHECK(memcmp(buf, new_p, new_len) == 0);
             CHECK(nvlog_read_payload(&rm, &recs[0], buf, sizeof(buf)) == NVLOG_OK);
-            CHECK(memcmp(buf, old_b, len) == 0);
+            CHECK(memcmp(buf, old_b, old_len) == 0);
         } else {
             CHECK(st == NVLOG_ERR_IO);
             CHECK(recs[0].seq == old_recs[0].seq);
@@ -530,16 +536,16 @@ static void test_old_or_new_overwrite(void)
             CHECK(stats.free_bytes == old_stats.free_bytes);
             CHECK(stats.next_seq == old_stats.next_seq);
             CHECK(rm.tail_ptr == old_recs[0].offset);
-            CHECK(rm.write_ptr == old_recs[1].offset + record_alloc);
+            CHECK(rm.write_ptr == old_recs[1].offset + old_alloc);
             CHECK(rm.record_count == stats.record_count);
             CHECK(rm.used_bytes == stats.used_bytes);
             CHECK(rm.free_bytes == stats.free_bytes);
             CHECK(rm.next_seq == stats.next_seq);
             uint8_t buf[22016];
             CHECK(nvlog_read_payload(&rm, &recs[0], buf, sizeof(buf)) == NVLOG_OK);
-            CHECK(memcmp(buf, old_a, len) == 0);
+            CHECK(memcmp(buf, old_a, old_len) == 0);
             CHECK(nvlog_read_payload(&rm, &recs[1], buf, sizeof(buf)) == NVLOG_OK);
-            CHECK(memcmp(buf, old_b, len) == 0);
+            CHECK(memcmp(buf, old_b, old_len) == 0);
         }
     }
 

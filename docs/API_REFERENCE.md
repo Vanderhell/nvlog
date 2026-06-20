@@ -60,6 +60,7 @@ Reads payload for a record returned by the iterator.
 Requires:
 
 - matching session id
+- matching mutation
 - matching generation
 - matching record metadata
 

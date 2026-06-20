@@ -935,40 +935,42 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
 {
     if (!ctx || !hal || !hal->read || !hal->write)
         return NVLOG_ERR_PARAM;
-    ctx->hal = *hal;
-    ctx->region_size = region_size;
-    ctx->write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
-    ctx->tail_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
-    ctx->mode = NVLOG_MODE_LINEAR;
-    ctx->used_bytes = 0;
-    ctx->free_bytes = region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE;
-    ctx->padding_bytes = 0;
-    ctx->reserve_bytes = 0;
-    ctx->geometry_key = 0;
-    ctx->media_class = 0;
-    ctx->program_unit = 1u;
-    ctx->erased_value = 0xFFu;
+    nvlog_ctx_t candidate;
+    memset(&candidate, 0, sizeof(candidate));
+    candidate.hal = *hal;
+    candidate.region_size = region_size;
+    candidate.write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    candidate.tail_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    candidate.mode = NVLOG_MODE_LINEAR;
+    candidate.used_bytes = 0;
+    candidate.free_bytes = region_size - (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    candidate.padding_bytes = 0;
+    candidate.reserve_bytes = 0;
+    candidate.geometry_key = 0;
+    candidate.media_class = 0;
+    candidate.program_unit = 1u;
+    candidate.erased_value = 0xFFu;
     nvlog_superblock_t sb;
-    nvlog_status_t sb_status = load_current_superblock(ctx, &sb);
+    nvlog_status_t sb_status = load_current_superblock(&candidate, &sb);
     if (sb_status != NVLOG_OK) return sb_status;
     if (sb.mode != NVLOG_MODE_LINEAR) return NVLOG_ERR_MODE_MISMATCH;
     if (sb.region_size != region_size) return NVLOG_ERR_SIZE_MISMATCH;
-    ctx->mode = (nvlog_mode_t)sb.mode;
-    ctx->media_class = sb.media_class;
-    ctx->generation = sb.generation;
-    ctx->metadata_seq = next_session_value(sb.metadata_seq);
-    if (ctx->metadata_seq == 0) ctx->metadata_seq = 1u;
-    ctx->session_id = ctx->metadata_seq;
-    ctx->mutation = next_session_value(ctx->mutation);
-    ctx->geometry_key = sb.feature_flags;
-    ctx->program_unit = sb.reserved0 ? (uint8_t)sb.reserved0 : 1u;
-    if (ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
-        if (ctx->program_unit != 1u &&
-            ctx->program_unit != 4u &&
-            ctx->program_unit != 8u &&
-            ctx->program_unit != 32u)
+    candidate.mode = (nvlog_mode_t)sb.mode;
+    candidate.media_class = sb.media_class;
+    candidate.generation = sb.generation;
+    candidate.metadata_seq = next_session_value(sb.metadata_seq);
+    if (candidate.metadata_seq == 0) candidate.metadata_seq = 1u;
+    candidate.session_id = candidate.metadata_seq;
+    candidate.mutation = ctx->mounted ? next_session_value(ctx->mutation) : 1u;
+    candidate.geometry_key = sb.feature_flags;
+    candidate.program_unit = sb.reserved0 ? (uint8_t)sb.reserved0 : 1u;
+    if (candidate.media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
+        if (candidate.program_unit != 1u &&
+            candidate.program_unit != 4u &&
+            candidate.program_unit != 8u &&
+            candidate.program_unit != 32u)
             return NVLOG_ERR_UNSUPPORTED;
-    } else if (ctx->program_unit != 1u) {
+    } else if (candidate.program_unit != 1u) {
         return NVLOG_ERR_UNSUPPORTED;
     }
 
@@ -977,25 +979,25 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
     while (cursor <= region_size && region_size - cursor >= NVLOG_RECORD_OVERHEAD) {
         nvlog_rec_hdr_t hdr;
         uint32_t        total;
-        nvlog_verify_result_t vr = verify_record(ctx, cursor, &hdr, &total, NULL);
+        nvlog_verify_result_t vr = verify_record(&candidate, cursor, &hdr, &total, NULL);
         nvlog_status_t st = verify_result_status(vr);
         if (st == NVLOG_OK) {
-            if (!nvlog_u32_add_checked(cursor, total, &ctx->write_ptr))
+            if (!nvlog_u32_add_checked(cursor, total, &candidate.write_ptr))
                 return NVLOG_ERR_BOUNDS;
-            ctx->next_seq  = hdr.seq + 1;
+            candidate.next_seq  = hdr.seq + 1;
             record_count++;
-            cursor         = ctx->write_ptr;
+            cursor         = candidate.write_ptr;
             continue;
         }
         if (st == NVLOG_ERR_END)
             break;
-        if (st == NVLOG_ERR_INCOMPLETE && ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
-            uint32_t expected_alloc = rec_alloc_bytes(hdr.payload_len, ctx->program_unit);
+        if (st == NVLOG_ERR_INCOMPLETE && candidate.media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
+            uint32_t expected_alloc = rec_alloc_bytes(hdr.payload_len, candidate.program_unit);
             uint32_t dirty_end = 0;
             if (hdr.alloc_len == expected_alloc &&
                 nvlog_u32_add_checked(cursor, hdr.alloc_len, &dirty_end) &&
                 dirty_end <= region_size) {
-                ctx->write_ptr = dirty_end;
+                candidate.write_ptr = dirty_end;
                 cursor = dirty_end;
                 continue;
             }
@@ -1005,11 +1007,11 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
         return st;
     }
 
-    ctx->used_bytes = ctx->write_ptr - (uint32_t)NVLOG_REGION_HEADER_SIZE;
-    ctx->free_bytes = ctx->region_size - ctx->write_ptr;
-    ctx->record_count = record_count;
-
-    ctx->mounted = 1;
+    candidate.used_bytes = candidate.write_ptr - (uint32_t)NVLOG_REGION_HEADER_SIZE;
+    candidate.free_bytes = candidate.region_size - candidate.write_ptr;
+    candidate.record_count = record_count;
+    candidate.mounted = 1;
+    *ctx = candidate;
     return NVLOG_OK;
 }
 
@@ -1301,6 +1303,7 @@ nvlog_status_t nvlog_iter_next(nvlog_iter_t *it, nvlog_record_t *out)
             out->offset = offset;
             out->generation = hdr.generation;
             out->session_id = ctx->session_id;
+            out->mutation = ctx->mutation;
             out->crc32 = payload_crc;
             it->count++;
             return NVLOG_OK;
@@ -1348,6 +1351,7 @@ nvlog_status_t nvlog_iter_next(nvlog_iter_t *it, nvlog_record_t *out)
             out->offset = offset;
             out->generation = hdr.generation;
             out->session_id = ctx->session_id;
+            out->mutation = ctx->mutation;
             out->crc32 = payload_crc;
             it->count++;
             return NVLOG_OK;
@@ -1381,6 +1385,8 @@ nvlog_status_t nvlog_read_payload(nvlog_ctx_t *ctx,
     if (st != NVLOG_OK)
         return st;
     if (record->session_id != ctx->session_id)
+        return NVLOG_ERR_STALE;
+    if (record->mutation != ctx->mutation)
         return NVLOG_ERR_STALE;
     if (record->generation != hdr.generation || record->crc32 != payload_crc)
         return NVLOG_ERR_STALE;
@@ -1434,53 +1440,55 @@ nvlog_status_t nvlog_ring_mount(nvlog_ctx_t *ctx,
                                  uint32_t region_size)
 {
     if (!ctx || !hal || !hal->read || !hal->write) return NVLOG_ERR_PARAM;
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->hal         = *hal;
-    ctx->region_size = region_size;
-    ctx->mode        = NVLOG_MODE_RING;
-    ctx->geometry_key = 0;
-    ctx->media_class = 0;
-    ctx->program_unit = 1u;
-    ctx->erased_value = 0xFFu;
+    nvlog_ctx_t candidate;
+    memset(&candidate, 0, sizeof(candidate));
+    candidate.hal         = *hal;
+    candidate.region_size = region_size;
+    candidate.mode        = NVLOG_MODE_RING;
+    candidate.geometry_key = 0;
+    candidate.media_class = 0;
+    candidate.program_unit = 1u;
+    candidate.erased_value = 0xFFu;
 
     nvlog_superblock_t sb;
-    nvlog_status_t sb_status = load_current_superblock(ctx, &sb);
+    nvlog_status_t sb_status = load_current_superblock(&candidate, &sb);
     if (sb_status != NVLOG_OK) return sb_status;
     if (sb.mode != NVLOG_MODE_RING) return NVLOG_ERR_MODE_MISMATCH;
     if (sb.region_size != region_size) return NVLOG_ERR_SIZE_MISMATCH;
-    ctx->generation = sb.generation;
-    ctx->media_class = sb.media_class;
-    ctx->metadata_seq = sb.metadata_seq;
-    ctx->write_ptr = sb.write_ptr;
-    ctx->tail_ptr = sb.tail_ptr;
-    ctx->next_seq = sb.next_seq;
-    ctx->record_count = sb.record_count;
-    ctx->used_bytes = sb.used_bytes;
-    ctx->free_bytes = sb.free_bytes;
-    ctx->padding_bytes = sb.padding_bytes;
-    ctx->reserve_bytes = sb.reserve_bytes ? sb.reserve_bytes : NVLOG_RING_RESERVE_BYTES;
-    ctx->ring_full = (ctx->free_bytes == 0);
-    ctx->metadata_seq = next_session_value(sb.metadata_seq);
-    if (ctx->metadata_seq == 0) ctx->metadata_seq = 1u;
-    ctx->session_id = ctx->metadata_seq;
-    ctx->mutation = ctx->metadata_seq;
-    if (ctx->reserve_bytes != NVLOG_RING_RESERVE_BYTES) return NVLOG_ERR_UNSUPPORTED;
-    ctx->geometry_key = sb.feature_flags;
-    ctx->program_unit = sb.reserved0 ? (uint8_t)sb.reserved0 : 1u;
-    if (ctx->media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
-        if (ctx->program_unit != 1u &&
-            ctx->program_unit != 4u &&
-            ctx->program_unit != 8u &&
-            ctx->program_unit != 32u)
+    candidate.generation = sb.generation;
+    candidate.media_class = sb.media_class;
+    candidate.metadata_seq = sb.metadata_seq;
+    candidate.write_ptr = sb.write_ptr;
+    candidate.tail_ptr = sb.tail_ptr;
+    candidate.next_seq = sb.next_seq;
+    candidate.record_count = sb.record_count;
+    candidate.used_bytes = sb.used_bytes;
+    candidate.free_bytes = sb.free_bytes;
+    candidate.padding_bytes = sb.padding_bytes;
+    candidate.reserve_bytes = sb.reserve_bytes ? sb.reserve_bytes : NVLOG_RING_RESERVE_BYTES;
+    candidate.ring_full = (candidate.free_bytes == 0);
+    candidate.metadata_seq = next_session_value(sb.metadata_seq);
+    if (candidate.metadata_seq == 0) candidate.metadata_seq = 1u;
+    candidate.session_id = candidate.metadata_seq;
+    candidate.mutation = ctx->mounted ? next_session_value(ctx->mutation) : 1u;
+    if (candidate.reserve_bytes != NVLOG_RING_RESERVE_BYTES) return NVLOG_ERR_UNSUPPORTED;
+    candidate.geometry_key = sb.feature_flags;
+    candidate.program_unit = sb.reserved0 ? (uint8_t)sb.reserved0 : 1u;
+    if (candidate.media_class == NVLOG_MEDIA_CLASS_ERASE_BEFORE_WRITE) {
+        if (candidate.program_unit != 1u &&
+            candidate.program_unit != 4u &&
+            candidate.program_unit != 8u &&
+            candidate.program_unit != 32u)
             return NVLOG_ERR_UNSUPPORTED;
-    } else if (ctx->program_unit != 1u) {
+    } else if (candidate.program_unit != 1u) {
         return NVLOG_ERR_UNSUPPORTED;
     }
-    if (ctx->write_ptr < NVLOG_REGION_HEADER_SIZE || ctx->write_ptr > region_size) return NVLOG_ERR_CORRUPT;
-    if (ctx->tail_ptr < NVLOG_REGION_HEADER_SIZE || ctx->tail_ptr > region_size) return NVLOG_ERR_CORRUPT;
-    if (ctx->free_bytes > ring_usable_bytes(ctx)) return NVLOG_ERR_CORRUPT;
-    if (ring_validate_window(ctx) != 0) return NVLOG_ERR_CORRUPT;
-    ctx->mounted = 1;
+    if (candidate.write_ptr < NVLOG_REGION_HEADER_SIZE || candidate.write_ptr > region_size) return NVLOG_ERR_CORRUPT;
+    if (candidate.tail_ptr < NVLOG_REGION_HEADER_SIZE || candidate.tail_ptr > region_size) return NVLOG_ERR_CORRUPT;
+    if (candidate.free_bytes > ring_usable_bytes(&candidate)) return NVLOG_ERR_CORRUPT;
+    if (ring_validate_window(&candidate) != 0) return NVLOG_ERR_CORRUPT;
+    candidate.mounted = 1;
+    *ctx = candidate;
     return NVLOG_OK;
 }
 

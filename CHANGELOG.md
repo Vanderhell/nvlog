@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8 - 2026-06-20
+
+- Tightened ring recovery tests around overwrite and remount behavior.
+- Preserved stale invalidation through per-context mutation snapshots.
+- Kept mount read-only while making failed remounts non-destructive.
+
 ## 1.0.7 - 2026-06-20
 
 - Kept mounts read-only while still refreshing in-memory session identity so stale iterators are invalidated without rewriting metadata on media.

@@ -73,6 +73,7 @@ static uint32_t count_records(nvlog_ctx_t *ctx)
 static int mount_and_count(nvlog_hal_t *hal)
 {
     nvlog_ctx_t ctx;
+    nvlog_ctx_init(&ctx);
     if (nvlog_mount(&ctx, hal, NVM_SIZE) != NVLOG_OK) return -1;
     return (int)count_records(&ctx);
 }

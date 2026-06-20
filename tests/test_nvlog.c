@@ -219,9 +219,11 @@ static void test_linear_remount_invalidates_iterator(void)
     nvlog_iter_t it;
     nvlog_record_t rec;
     CHECK(nvlog_iter_init(&it, &ctx) == NVLOG_OK);
+    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_OK);
 
     CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
     CHECK(nvlog_iter_next(&it, &rec) == NVLOG_ERR_STALE);
+    CHECK(nvlog_read_payload(&ctx, &rec, (char[2]){0}, sizeof((char[2]){0})) == NVLOG_ERR_STALE);
 
     nvlog_posix_close(&pctx);
 }
@@ -429,6 +431,16 @@ static void test_read_failures_and_large_buffers(void)
     nvlog_posix_inject_read_fail_after(&pctx, -1);
 
     CHECK(nvlog_mount(&mount_ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    uint32_t snapshot_next_seq = mount_ctx.next_seq;
+    uint32_t snapshot_write_ptr = mount_ctx.write_ptr;
+    uint32_t snapshot_tail_ptr = mount_ctx.tail_ptr;
+
+    nvlog_posix_inject_read_fail_after(&pctx, 0);
+    CHECK(nvlog_mount(&mount_ctx, &hal, NVM_SIZE) == NVLOG_ERR_IO);
+    nvlog_posix_inject_read_fail_after(&pctx, -1);
+    CHECK(mount_ctx.next_seq == snapshot_next_seq);
+    CHECK(mount_ctx.write_ptr == snapshot_write_ptr);
+    CHECK(mount_ctx.tail_ptr == snapshot_tail_ptr);
 
     nvlog_iter_t it;
     nvlog_record_t rec;

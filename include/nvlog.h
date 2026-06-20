@@ -1,7 +1,7 @@
 /**
  * nvlog — persistent record buffer for byte-writable and erase-before-write media.
  *
- * Public API version: 1.0.7.
+* Public API version: 1.0.8.
  *
  * The implementation uses explicit little-endian wire encoding, committed
  * superblocks, committed DATA/WRAP/PADDING records, and wrap-aware recovery.
@@ -23,7 +23,7 @@ extern "C" {
 
 #define NVLOG_VERSION_MAJOR 1
 #define NVLOG_VERSION_MINOR 0
-#define NVLOG_VERSION_PATCH 7
+#define NVLOG_VERSION_PATCH 8
 
 /* --- limits ---------------------------------------------------- */
 
@@ -172,6 +172,7 @@ typedef struct {
     uint32_t  offset;       /* NVM offset of this record (for debugging) */
     uint32_t  generation;   /* media generation observed at iteration time */
     uint32_t  session_id;   /* mount/session identity observed at iteration time */
+    uint32_t  mutation;     /* context mutation observed at iteration time */
     uint32_t  crc32;        /* payload CRC32 */
     /* payload is NOT copied here — use nvlog_read_payload() */
 } nvlog_record_t;
