@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Added the missing user-facing documentation layer: getting started, cookbook, architecture, porting, power-loss contract, API reference, testing, capacity planning, RTOS integration, hardware validation, contributing, security, and support guides.
+- Added compile-verified example programs and README files under `examples/`.
+- Added GitHub issue and pull request templates for bugs, backend requests, and hardware validation results.
+
 ## 1.0.5 - 2026-06-20
 
 - Final audited release head after the stage evidence, CI, and release-tag audit pass.

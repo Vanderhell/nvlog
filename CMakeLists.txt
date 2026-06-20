@@ -100,6 +100,8 @@ target_link_libraries(test_backends
     nvlog_espidf_partition_example
 )
 
+add_subdirectory(examples)
+
 enable_testing()
 add_test(NAME suite_v01 COMMAND test_nvlog)
 add_test(NAME suite_v02 COMMAND test_powerloss)

@@ -42,6 +42,23 @@ Current limitations:
 - flash-backed runtime behavior is compile-verified only for the example integrations
 - claims should be read against the tests and build evidence in this tree
 
+User-facing documentation:
+
+- [Getting Started](docs/GETTING_STARTED.md)
+- [Cookbook](docs/COOKBOOK.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Power Loss Contract](docs/POWER_LOSS_CONTRACT.md)
+- [Porting Guide](docs/PORTING_GUIDE.md)
+- [API Reference](docs/API_REFERENCE.md)
+- [Testing](docs/TESTING.md)
+- [Capacity Planning](docs/CAPACITY_PLANNING.md)
+- [RTOS Integration](docs/RTOS_INTEGRATION.md)
+- [Hardware Validation](docs/HARDWARE_VALIDATION.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Support](SUPPORT.md)
+- [Examples](examples/README.md)
+
 ## Build
 
 ```bash
