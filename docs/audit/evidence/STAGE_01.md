@@ -2,7 +2,7 @@
 
 ## Exact Commit SHA
 
-`6b285f087d0607e7ad184602e332d20ff5e5ad0f`
+`7af2b17b2c4b2c2b4f76d2a3f8e3a8d24efb3fa5`
 
 ## Changed Files
 
@@ -37,7 +37,7 @@
 ## Exact Results
 
 - Local branch: `master`
-- HEAD: `6b285f087d0607e7ad184602e332d20ff5e5ad0f`
+- HEAD: `7af2b17b2c4b2c2b4f76d2a3f8e3a8d24efb3fa5`
 - Local tags: `v1.0.0`, `v1.0.1`
 - `v1.0.1` is an annotated tag.
 - `v1.0.1` resolves to `6b285f087d0607e7ad184602e332d20ff5e5ad0f`.

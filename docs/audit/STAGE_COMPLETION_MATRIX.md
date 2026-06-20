@@ -2,7 +2,7 @@
 
 | Stage | Status | Commit | Required tests | Evidence file | Remaining limits |
 |---|---|---|---|---|---|
-| 01 - PREFLIGHT, RELEASE TRUTH, AND BASELINE LOCK | PASS | `6b285f087d0607e7ad184602e332d20ff5e5ad0f` | truth guard direct; truth guard via CTest; `git diff --check` | `docs/audit/evidence/STAGE_01.md` | Physical STM32 and ESP32 remain not hardware-verified. |
+| 01 - PREFLIGHT, RELEASE TRUTH, AND BASELINE LOCK | PASS | `7af2b17b2c4b2c2b4f76d2a3f8e3a8d24efb3fa5` | truth guard direct; truth guard via CTest; `git diff --check` | `docs/audit/evidence/STAGE_01.md` | Physical STM32 and ESP32 remain not hardware-verified. |
 | 02 - CORE RECOVERY AND STATUS SEPARATION | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
 | 03 - STALE IDENTITY, ITERATOR SAFETY, AND API CONTRACT | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
 | 04 - RING REPRESENTATION AND OLD-OR-NEW ATOMICITY | NOT STARTED |  |  |  | Physical STM32 and ESP32 remain not hardware-verified. |
