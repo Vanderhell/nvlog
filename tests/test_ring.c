@@ -473,11 +473,14 @@ static void test_old_or_new_overwrite(void)
 
     nvlog_record_t old_recs[4];
     uint32_t old_n = 0;
+    nvlog_stats_t old_stats;
+    const uint32_t record_alloc = NVLOG_RECORD_OVERHEAD + len;
 
     CHECK(nvlog_append(&ctx, old_a, len) == NVLOG_OK);
     CHECK(nvlog_append(&ctx, old_b, len) == NVLOG_OK);
     old_n = collect_records(&ctx, old_recs, 4);
     CHECK(old_n == 2u);
+    CHECK(nvlog_stats(&ctx, &old_stats) == NVLOG_OK);
 
     const int fail_points[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
     for (uint32_t i = 0; i < sizeof(fail_points) / sizeof(fail_points[0]); i++) {
@@ -493,14 +496,50 @@ static void test_old_or_new_overwrite(void)
         CHECK(nvlog_ring_mount(&rm, &hal, size) == NVLOG_OK);
         nvlog_record_t recs[8];
         uint32_t n = collect_records(&rm, recs, 8);
-        CHECK(n >= 1u);
+        nvlog_stats_t stats;
+        CHECK(nvlog_stats(&rm, &stats) == NVLOG_OK);
+        CHECK(n == 2u);
         if (st == NVLOG_OK) {
             uint8_t buf[22016];
-            CHECK(nvlog_read_payload(&rm, &recs[n - 1u], buf, sizeof(buf)) == NVLOG_OK);
+            CHECK(recs[0].seq == old_recs[1].seq);
+            CHECK(recs[1].seq == old_recs[1].seq + 1u);
+            CHECK(recs[0].offset == old_recs[1].offset);
+            CHECK(recs[1].offset == old_recs[1].offset + record_alloc);
+            CHECK(stats.record_count == old_stats.record_count);
+            CHECK(stats.used_bytes == old_stats.used_bytes);
+            CHECK(stats.free_bytes == old_stats.free_bytes);
+            CHECK(stats.next_seq == old_stats.next_seq + 1u);
+            CHECK(rm.tail_ptr == recs[0].offset);
+            CHECK(rm.write_ptr == recs[1].offset + record_alloc);
+            CHECK(rm.record_count == stats.record_count);
+            CHECK(rm.used_bytes == stats.used_bytes);
+            CHECK(rm.free_bytes == stats.free_bytes);
+            CHECK(rm.next_seq == stats.next_seq);
+            CHECK(nvlog_read_payload(&rm, &recs[1], buf, sizeof(buf)) == NVLOG_OK);
             CHECK(memcmp(buf, new_p, len) == 0);
+            CHECK(nvlog_read_payload(&rm, &recs[0], buf, sizeof(buf)) == NVLOG_OK);
+            CHECK(memcmp(buf, old_b, len) == 0);
         } else {
             CHECK(st == NVLOG_ERR_IO);
-            CHECK(n >= old_n);
+            CHECK(recs[0].seq == old_recs[0].seq);
+            CHECK(recs[1].seq == old_recs[1].seq);
+            CHECK(recs[0].offset == old_recs[0].offset);
+            CHECK(recs[1].offset == old_recs[1].offset);
+            CHECK(stats.record_count == old_stats.record_count);
+            CHECK(stats.used_bytes == old_stats.used_bytes);
+            CHECK(stats.free_bytes == old_stats.free_bytes);
+            CHECK(stats.next_seq == old_stats.next_seq);
+            CHECK(rm.tail_ptr == old_recs[0].offset);
+            CHECK(rm.write_ptr == old_recs[1].offset + record_alloc);
+            CHECK(rm.record_count == stats.record_count);
+            CHECK(rm.used_bytes == stats.used_bytes);
+            CHECK(rm.free_bytes == stats.free_bytes);
+            CHECK(rm.next_seq == stats.next_seq);
+            uint8_t buf[22016];
+            CHECK(nvlog_read_payload(&rm, &recs[0], buf, sizeof(buf)) == NVLOG_OK);
+            CHECK(memcmp(buf, old_a, len) == 0);
+            CHECK(nvlog_read_payload(&rm, &recs[1], buf, sizeof(buf)) == NVLOG_OK);
+            CHECK(memcmp(buf, old_b, len) == 0);
         }
     }
 

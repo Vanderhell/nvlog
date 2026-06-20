@@ -203,6 +203,28 @@ static void test_mount_recovery(void)
     nvlog_posix_close(&pctx);
 }
 
+static void test_linear_remount_invalidates_iterator(void)
+{
+    TEST("linear remount invalidates iterator");
+
+    nvlog_ctx_t       ctx;
+    nvlog_posix_ctx_t pctx;
+    nvlog_hal_t       hal;
+    make_ctx(&ctx, &pctx, &hal);
+
+    CHECK(nvlog_format(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_append(&ctx, "A", 1) == NVLOG_OK);
+
+    nvlog_iter_t it;
+    nvlog_record_t rec;
+    CHECK(nvlog_iter_init(&it, &ctx) == NVLOG_OK);
+
+    CHECK(nvlog_mount(&ctx, &hal, NVM_SIZE) == NVLOG_OK);
+    CHECK(nvlog_iter_next(&it, &rec) == NVLOG_ERR_STALE);
+
+    nvlog_posix_close(&pctx);
+}
+
 /* ─── test 5: power-loss during append ───────────────────────── */
 
 static void test_power_loss(void)
@@ -461,6 +483,7 @@ int main(void)
     test_multiple();
     test_corrupt_crc();
     test_mount_recovery();
+    test_linear_remount_invalidates_iterator();
     test_power_loss();
     test_full();
     test_stats();

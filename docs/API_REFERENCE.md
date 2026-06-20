@@ -20,7 +20,11 @@ Returns:
 
 Mounts an existing linear region and restores the write pointer.
 
-Returns `NVLOG_ERR_INCOMPLETE` only internally during recovery scanning; the public API returns the mapped status.
+Successful remounts refresh the session identity so old iterators and record
+snapshots become stale.
+
+Returns `NVLOG_ERR_INCOMPLETE` only internally during recovery scanning; the
+public API returns the mapped status.
 
 ## `nvlog_append()`
 
@@ -42,6 +46,9 @@ The iterator becomes stale after:
 - remount
 - format
 - append on the same context
+
+Corrupt or truncated data is reported through explicit status codes instead of
+being silently accepted.
 
 ## `nvlog_read_payload()`
 
@@ -78,4 +85,3 @@ Returns the count of valid records in ring mode.
 - A context is owned by the caller.
 - A mounted context stays valid until the next format, remount, or append that changes its mutation state.
 - Iterators and record descriptors are snapshots, not persistent handles.
-

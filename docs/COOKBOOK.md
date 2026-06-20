@@ -35,8 +35,13 @@ Store small configuration revisions safely.
 
 ### Code
 ```c
-if (nvlog_mount(&ctx, &eeprom_hal, eeprom_size) != NVLOG_OK) {
+if (nvlog_mount(&ctx, &eeprom_hal, eeprom_size) == NVLOG_OK) {
+    /* existing log mounted successfully */
+} else if (eeprom_is_blank()) {
     if (nvlog_format(&ctx, &eeprom_hal, eeprom_size) != NVLOG_OK) return;
+} else {
+    /* surface the mount error instead of formatting blindly */
+    return;
 }
 ```
 
@@ -184,4 +189,3 @@ Protect one `nvlog_ctx_t` with one mutex.
 ### Do not
 - call the API from ISR context
 - share a context without serialization
-

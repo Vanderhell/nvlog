@@ -9,9 +9,12 @@
 
 It is designed for embedded and host-simulated media where record recovery, deterministic encoding, and power-loss behavior matter more than a generic logging API.
 
-Current release: `v1.0.6`.
+Current development version: `v1.0.6`.
 
-## Release Snapshot
+The public GitHub release tag is not yet published, so treat this tree as the
+development head until the release is pushed.
+
+## Development Snapshot
 
 - C99 core library
 - explicit v0.5 media encoding with byte-writable and erase-before-write media contracts

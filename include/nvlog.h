@@ -219,8 +219,9 @@ nvlog_status_t nvlog_mount(nvlog_ctx_t *ctx,
  * nvlog_append() — write one record.
  *
  * Atomically (from recovery perspective) appends payload.
- * CRC32 is computed and written as the final commit step.
- * If power is lost before CRC write, record is invisible on next mount.
+ * The wire format stores CRC bytes explicitly and uses a final commit marker.
+ * If power is lost before the commit marker is written, the record is invisible
+ * on the next mount.
  *
  * Returns NVLOG_ERR_FULL if not enough space remains.
  */
@@ -237,8 +238,8 @@ nvlog_status_t nvlog_iter_init(nvlog_iter_t *it, nvlog_ctx_t *ctx);
  * nvlog_iter_next() — advance iterator, fill record header.
  *
  * Returns NVLOG_ERR_NO_DATA when all records consumed.
- * Skips corrupt records (bad magic, bad CRC) silently —
- * they are treated as end-of-log.
+ * Recovery surfaces explicit error statuses for corrupt or truncated records;
+ * callers must not assume silent skipping of invalid data.
  */
 nvlog_status_t nvlog_iter_next(nvlog_iter_t *it, nvlog_record_t *out);
 
