@@ -33,6 +33,9 @@
 #define BENCH_SD_TEST_FILE "/loxbench/session.log"
 
 // ---------- PSRAM ----------
+#ifndef BOARD_HAS_PSRAM
+#define BOARD_HAS_PSRAM 1
+#endif
 #define BENCH_PSRAM_ENABLED 1
 #define BENCH_PSRAM_TEST_BYTES (64U * 1024U)
 
