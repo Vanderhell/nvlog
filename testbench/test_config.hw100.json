@@ -35,7 +35,7 @@
     "backend": "command",
     "mode": "fixed",
     "startup_delay_seconds": 5,
-    "fixed_interval_seconds": 2,
+    "fixed_interval_seconds": 5,
     "random_min_seconds": 30,
     "random_max_seconds": 180,
     "off_duration_seconds": 0.5,

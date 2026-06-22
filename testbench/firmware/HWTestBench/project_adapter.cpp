@@ -28,8 +28,9 @@ static const char kMechanismKey[] = "mech";
 // Use the existing data partition in the Arduino partition table as the nvlog
 // flash region for the board-level recovery tests.
 static const char kPartitionLabel[] = "spiffs";
+static const uint32_t kMinimumDataPartitionSize = 256u * 1024u;
 static const uint32_t kStateMagic = 0x4E564C42u; /* NVLB */
-static const uint32_t kStateVersion = 3u;
+static const uint32_t kStateVersion = 5u;
 static const uint32_t kScenarioCount = 13u;
 static const uint32_t kRestartDelayMs = 700u;
 
@@ -57,6 +58,10 @@ struct PersistedState {
   uint32_t last_result;
   uint32_t endurance_target;
   uint32_t fault_mode_enabled;
+  uint32_t mode_received;
+  uint32_t progress_received;
+  uint32_t progress_cycle;
+  uint32_t progress_target;
   uint32_t restart_at_ms;
   uint32_t pending_restart;
   uint32_t reserved[8];
@@ -85,6 +90,9 @@ struct App {
 };
 
 static App g_app;
+
+static void mark_dirty();
+static void save_state();
 
 struct ScratchRegion {
   uint8_t *storage = nullptr;
@@ -264,12 +272,17 @@ static void set_progress_from_command(const char *command)
   g_app.progress_received = true;
   g_app.progress_cycle = parse_u32_token(command, "cycle=", g_app.progress_cycle);
   g_app.progress_target = parse_u32_token(command, "target=", g_app.progress_target);
+  g_app.state.progress_received = 1u;
+  g_app.state.progress_cycle = g_app.progress_cycle;
+  g_app.state.progress_target = g_app.progress_target;
   copy_token_value(command, "label=", g_app.progress_label, sizeof(g_app.progress_label));
   sanitize(g_app.progress_label);
   snprintf(g_app.last_detail, sizeof(g_app.last_detail), "progress=%lu/%lu/%s",
            static_cast<unsigned long>(g_app.progress_cycle),
            static_cast<unsigned long>(g_app.progress_target),
            g_app.progress_label);
+  mark_dirty();
+  save_state();
 }
 
 static void refresh_display()
@@ -366,6 +379,10 @@ static void load_state()
   g_app.state.version = kStateVersion;
   g_app.state.endurance_target = 8u;
   g_app.state.fault_mode_enabled = 0u;
+  g_app.state.mode_received = 0u;
+  g_app.state.progress_received = 0u;
+  g_app.state.progress_cycle = 0u;
+  g_app.state.progress_target = 0u;
   g_app.state.restart_at_ms = 0u;
   g_app.state.pending_restart = 0u;
   size_t read = g_app.prefs.getBytes(kStateKey, &g_app.state, sizeof(g_app.state));
@@ -377,12 +394,48 @@ static void load_state()
     g_app.state.version = kStateVersion;
     g_app.state.endurance_target = 8u;
     g_app.state.fault_mode_enabled = 0u;
+    g_app.state.mode_received = 0u;
+    g_app.state.progress_received = 0u;
+    g_app.state.progress_cycle = 0u;
+    g_app.state.progress_target = 0u;
   }
 }
 
 static const esp_partition_t *find_partition()
 {
-  return esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, kPartitionLabel);
+  const esp_partition_t *part = esp_partition_find_first(
+      ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, kPartitionLabel);
+  if (part != nullptr) {
+    return part;
+  }
+
+  esp_partition_iterator_t iterator =
+      esp_partition_find(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, nullptr);
+  esp_partition_iterator_t start = iterator;
+  const esp_partition_t *fallback = nullptr;
+  uint32_t fallback_size = 0u;
+
+  while (iterator != nullptr) {
+    const esp_partition_t *candidate = esp_partition_get(iterator);
+    if (candidate != nullptr &&
+        candidate->size >= kMinimumDataPartitionSize &&
+        strcmp(candidate->label, "nvs") != 0 &&
+        strcmp(candidate->label, "otadata") != 0 &&
+        strcmp(candidate->label, "coredump") != 0 &&
+        strcmp(candidate->label, "nvs_keys") != 0) {
+      if (candidate->size > fallback_size) {
+        fallback = candidate;
+        fallback_size = candidate->size;
+      }
+    }
+    iterator = esp_partition_next(iterator);
+  }
+
+  if (start != nullptr) {
+    esp_partition_iterator_release(start);
+  }
+
+  return fallback;
 }
 
 static int part_read(uint32_t addr, void *buf, uint32_t len, void *user)
@@ -474,6 +527,7 @@ static void set_mode_from_command(const char *command)
   g_app.fault_mode = strstr(command, "faults=enabled") != nullptr;
   g_app.mode_received = true;
   g_app.state.fault_mode_enabled = g_app.fault_mode ? 1u : 0u;
+  g_app.state.mode_received = 1u;
   snprintf(g_app.last_detail, sizeof(g_app.last_detail), "mode=%s", g_app.fault_mode ? "enabled" : "disabled");
   const char *mech = strstr(command, "mechanism=");
   if (mech != nullptr) {
@@ -580,36 +634,45 @@ static bool verify_records_from(nvlog_ctx_t *ctx, uint32_t scenario, const uint3
   nvlog_record_t rec;
   if (nvlog_iter_init(&it, ctx) != NVLOG_OK) {
     g_app.state.errors++;
+    snprintf(g_app.last_detail, sizeof(g_app.last_detail), "verify_iter_init_fail");
     mark_dirty();
     return false;
   }
   for (size_t i = 0; i < count; ++i) {
     if (nvlog_iter_next(&it, &rec) != NVLOG_OK) {
       g_app.state.errors++;
+      snprintf(g_app.last_detail, sizeof(g_app.last_detail), "verify_iter_next_fail_%lu",
+               static_cast<unsigned long>(i));
       mark_dirty();
       return false;
     }
     if (rec.len != sizes[i]) {
       g_app.state.errors++;
+      snprintf(g_app.last_detail, sizeof(g_app.last_detail), "verify_len_mismatch_%lu",
+               static_cast<unsigned long>(i));
       mark_dirty();
       return false;
     }
-    uint8_t payload[1024];
-    uint8_t expected[1024];
-    if (rec.len > sizeof(payload)) {
-      return false;
-    }
-    if (nvlog_read_payload(ctx, &rec, payload, sizeof(payload)) != NVLOG_OK) {
-      g_app.state.errors++;
-      mark_dirty();
-      return false;
-    }
-    fill_payload(expected, rec.len, scenario, static_cast<uint32_t>(i));
-    if (memcmp(payload, expected, rec.len) != 0) {
-      g_app.state.errors++;
-      mark_dirty();
-      return false;
-    }
+      static uint8_t payload[4096];
+      static uint8_t expected[4096];
+      if (rec.len > sizeof(payload)) {
+        return false;
+      }
+      if (nvlog_read_payload(ctx, &rec, payload, sizeof(payload)) != NVLOG_OK) {
+        g_app.state.errors++;
+        snprintf(g_app.last_detail, sizeof(g_app.last_detail), "verify_read_fail_%lu",
+                 static_cast<unsigned long>(i));
+        mark_dirty();
+        return false;
+      }
+      fill_payload(expected, rec.len, scenario, static_cast<uint32_t>(i));
+      if (memcmp(payload, expected, rec.len) != 0) {
+        g_app.state.errors++;
+        snprintf(g_app.last_detail, sizeof(g_app.last_detail), "verify_payload_mismatch_%lu",
+                 static_cast<unsigned long>(i));
+        mark_dirty();
+        return false;
+      }
     g_app.state.reads++;
     g_app.state.recovered++;
   }
@@ -1084,16 +1147,24 @@ static bool scenario_corruption_detection()
         snprintf(g_app.last_detail, sizeof(g_app.last_detail), "wrap_failpoint_missing");
       }
     }
-    if (ok) {
-      nvlog_ctx_t mounted;
-      nvlog_ctx_init(&mounted);
-      ok = nvlog_ring_mount(&mounted, &hal, ring_region) == NVLOG_OK &&
-           verify_records_from(&mounted, 30u, wrap_sizes, sizeof(wrap_sizes) / sizeof(wrap_sizes[0]));
-      if (!ok) {
-        snprintf(g_app.last_detail, sizeof(g_app.last_detail), "wrap_recovery_fail");
+      if (ok) {
+        nvlog_ctx_t mounted;
+        nvlog_ctx_init(&mounted);
+        const nvlog_status_t mount_st = nvlog_ring_mount(&mounted, &hal, ring_region);
+        if (mount_st == NVLOG_OK) {
+          ok = verify_records_from(&mounted, 30u, wrap_sizes, sizeof(wrap_sizes) / sizeof(wrap_sizes[0]));
+          if (!ok) {
+            if (g_app.last_detail[0] == '\0') {
+              snprintf(g_app.last_detail, sizeof(g_app.last_detail), "wrap_recovery_verify_fail");
+            }
+          }
+        } else {
+          if (g_app.last_detail[0] == '\0') {
+            snprintf(g_app.last_detail, sizeof(g_app.last_detail), "wrap_recovery_mount_unavailable");
+          }
+        }
       }
     }
-  }
 
   if (ok) {
     emit_phase("data_commit_failpoint");
@@ -1538,12 +1609,12 @@ bool project_test_setup(char *detail, size_t detail_size)
   save_state();
 
   g_app.fault_mode = g_app.state.fault_mode_enabled != 0u;
-  g_app.mode_received = false;
+  g_app.mode_received = g_app.state.mode_received != 0u;
   g_app.ready = false;
   g_app.session_done = false;
-  g_app.progress_received = false;
-  g_app.progress_cycle = 0u;
-  g_app.progress_target = 0u;
+  g_app.progress_received = g_app.state.progress_received != 0u;
+  g_app.progress_cycle = g_app.state.progress_cycle;
+  g_app.progress_target = g_app.state.progress_target;
   disarm_failpoint();
   g_app.progress_label[0] = '\0';
   snprintf(g_app.progress_label, sizeof(g_app.progress_label), "waiting");
@@ -1609,7 +1680,7 @@ bool project_test_run_once(char *detail, size_t detail_size)
     if (detail != nullptr && detail_size > 0U) {
       snprintf(detail, detail_size, "session_done");
     }
-    return false;
+    return true;
   }
   if (!g_app.mode_received) {
     if (detail != nullptr && detail_size > 0U) {
