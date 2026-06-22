@@ -27,10 +27,20 @@ arduino-cli upload -p COM19 --fqbn esp32:esp32:esp32s3:PSRAM=enabled,UploadMode=
 
 ## Current validation state
 
-- The board has been confirmed to enumerate as `USB Serial Device (COM19)`.
-- The host can open `COM19`.
-- The latest local session did not capture device RX after flash.
-- `PSRAM_TEST`, `PROJECT_TEST`, and `hw100` are not re-proven in the latest run.
+- The board enumerates as `USB Serial Device (COM19)`.
+- The host opens `COM19`.
+- The validated session completed with `SESSION_PASS`.
+- `power_cycles_started = 100`.
+- `power_cycles_completed = 100`.
+- `device_failpoint_events = 3`.
+- `last_failpoint_name = superblock_publish`.
+- `ring_failpoint_smoke` passed.
+- `psram_api_smoke` passed and reported `psram_bytes = 8388608`.
+- Host-side tests passed: `11 passed`.
 
-This file intentionally avoids claiming completed validation until the serial RX
-and scenario evidence are present in the session artifacts.
+Session artifacts:
+
+- `testbench/sessions-hw100/20260622_144401/summary.json`
+- `testbench/sessions-hw100/20260622_144401/events.jsonl`
+- `testbench/sessions-hw100/20260622_144401/serial.log`
+- `testbench/sessions-hw100/20260622_144401/effective_config.json`

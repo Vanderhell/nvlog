@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Documented the verified ESP32-S3 hardware validation session with `SESSION_PASS`, `hw100` at 100/100 cycles, `ring_failpoint_smoke` passing, and host-side pytest coverage passing.
+
 ## 1.0.8 - 2026-06-20
 
 - Tightened ring recovery tests around overwrite and remount behavior.

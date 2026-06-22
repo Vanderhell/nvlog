@@ -44,8 +44,19 @@ the upload immediately after the board re-enumerates.
 For a hardware stress validation run with 100 restart cycles, use
 `test_config.hw100.json`. That config keeps the board on-screen updated with
 the current scenario, host cycle counter, and last progress label.
-The latest local `hw100` attempts reached 100 power cycles started and 100
-completed, but serial RX after flash was not re-proven in the latest run.
+
+The latest recorded `hw100` session completed successfully:
+
+- `SESSION_PASS`
+- `power_cycles_started = 100`
+- `power_cycles_completed = 100`
+- `device_failpoint_events = 3`
+- `last_failpoint_name = superblock_publish`
+- `ring_failpoint_smoke` passed
+- `psram_api_smoke` passed with `psram_bytes = 8388608`
+
+The session artifacts are in
+`testbench/sessions-hw100/20260622_144401/`.
 
 ## Host run
 

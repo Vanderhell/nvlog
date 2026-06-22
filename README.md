@@ -15,6 +15,9 @@ The public release tag is published. The GitHub Release object and any packaged
 assets are still pending, so treat this tree as the tagged development head
 until the release page is created.
 
+Hardware validation for the ESP32-S3 testbench is complete and recorded in
+`docs/HARDWARE_VALIDATION.md`.
+
 ## Development Snapshot
 
 - C99 core library
@@ -138,11 +141,12 @@ Debug uses the same steps with `build-debug`.
 - simulator-tested: NOR flash simulator
 - protocol-mock-tested: backend protocol suite
 - compile-verified: FRAM, EEPROM, SPI NOR, STM32F4, STM32L4, STM32H7, ESP-IDF partition adapter
-- hardware-verified: not verified
+- hardware-verified: ESP32-S3 testbench validated
 
 ## Limitations
 
-- physical STM32 and ESP32 execution are not verified
+- physical STM32 execution is not verified
+- ESP32-S3 hardware validation is verified in the testbench docs and session artifacts
 - flash-backed runtime behavior is compile-verified only for the example integrations
 - claims should be read against the tests and build evidence in this tree
 
