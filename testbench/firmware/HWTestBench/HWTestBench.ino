@@ -197,9 +197,16 @@ void setup() {
 #endif
   Serial.begin(BENCH_SERIAL_BAUD);
   delay(250);
+  const uint32_t serial_ready_deadline = millis() + 3000U;
+  while (!Serial && millis() < serial_ready_deadline) {
+    delay(10);
+  }
+  bench_emit_message("BOOT_STAGE", "name", "after_serial_begin");
 
   g_boot_id = esp_random();
+  bench_emit_message("BOOT_STAGE", "name", "before_hal_begin");
   bench_hal_begin();
+  bench_emit_message("BOOT_STAGE", "name", "after_hal_begin");
 
   const esp_reset_reason_t reset_reason = esp_reset_reason();
   const BenchCapabilities &caps = bench_capabilities();
@@ -218,7 +225,9 @@ void setup() {
   bench_display_write_line(1U, "BOOT OK");
 
   char detail[96];
+  bench_emit_message("BOOT_STAGE", "name", "before_project_setup");
   const bool setup_passed = project_test_setup(detail, sizeof(detail));
+  bench_emit_message("BOOT_STAGE", "name", "after_project_setup");
   emit_test_result("project_setup", setup_passed, detail);
 
 #if BENCH_RUN_PROJECT_TEST_ON_BOOT

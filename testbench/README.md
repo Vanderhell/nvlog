@@ -7,7 +7,9 @@ ESP32-S3 board with the 0.96-inch display.
 ## Layout
 
 - `host/` - Python session runner, fault process, shared helpers, and tests.
-- `firmware/HWTestBench/` - Arduino project for the board.
+- `firmware/HWTestBench/` - Arduino project for the board. See
+  `firmware/HWTestBench/README.md` for the exact board id, FQBN, and build /
+  upload commands.
 - `docs/PROTOCOL.md` - serial event and command notes.
 - `test_config.json` - default session configuration.
 
@@ -42,9 +44,8 @@ the upload immediately after the board re-enumerates.
 For a hardware stress validation run with 100 restart cycles, use
 `test_config.hw100.json`. That config keeps the board on-screen updated with
 the current scenario, host cycle counter, and last progress label.
-The latest 100-cycle ESP32-S3 run completed with 100 power cycles started and
-100 completed; the `PSRAM_TEST` startup diagnostic reported `psram_not_found`
-on this board and was treated as informational.
+The latest local `hw100` attempts reached 100 power cycles started and 100
+completed, but serial RX after flash was not re-proven in the latest run.
 
 ## Host run
 
