@@ -5,7 +5,8 @@ logic.
 
 ## Behavior
 
-- Starts `Serial` at `115200`.
+- Uses `HWCDC` when building for ESP32-S3 USB-Serial/JTAG mode, otherwise
+  falls back to `Serial`, both at `115200`.
 - Prints `HELLO_FROM_APP` after boot.
 - Prints `APP_COUNTER` once per second.
 - Replies to `PING` with `NVLOG|ACK|command=PING`.
@@ -14,13 +15,13 @@ logic.
 ## Build
 
 ```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=enabled,UploadMode=default,USBMode=default,CDCOnBoot=cdc,FlashSize=16M,FlashMode=qio --output-dir build-serial-minimal testbench\firmware\SerialSmoke
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=enabled,UploadMode=cdc,USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,FlashMode=qio --output-dir build-serial-minimal-hwcdc testbench\firmware\SerialSmoke
 ```
 
 ## Upload
 
 ```powershell
-arduino-cli upload -p COM19 --fqbn esp32:esp32:esp32s3:PSRAM=enabled,UploadMode=default,USBMode=default,CDCOnBoot=cdc,FlashSize=16M,FlashMode=qio --input-dir build-serial-minimal testbench\firmware\SerialSmoke
+arduino-cli upload -p COM19 --fqbn esp32:esp32:esp32s3:PSRAM=enabled,UploadMode=cdc,USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,FlashMode=qio --input-dir build-serial-minimal-hwcdc testbench\firmware\SerialSmoke
 ```
 
 ## Notes

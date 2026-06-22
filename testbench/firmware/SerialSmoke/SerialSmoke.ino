@@ -1,23 +1,31 @@
 #include <Arduino.h>
 
+#if defined(ARDUINO_USB_MODE) && (ARDUINO_USB_MODE == 0)
+#include <USB.h>
+#include <HWCDC.h>
+HWCDC AppSerial;
+#else
+#define AppSerial Serial
+#endif
+
 void setup() {
-  Serial.begin(115200);
+  AppSerial.begin(115200);
   delay(1000);
-  Serial.println("HELLO_FROM_APP");
+  AppSerial.println("HELLO_FROM_APP");
 }
 
 void loop() {
-  Serial.println("APP_COUNTER");
+  AppSerial.println("APP_COUNTER");
   delay(1000);
 
-  if (Serial.available()) {
-    String line = Serial.readStringUntil('\n');
+  if (AppSerial.available()) {
+    String line = AppSerial.readStringUntil('\n');
     line.trim();
     if (line == "PING") {
-      Serial.println("NVLOG|ACK|command=PING");
+      AppSerial.println("NVLOG|ACK|command=PING");
     }
     if (line == "STATUS") {
-      Serial.println("NVLOG|STATUS|mode=serial_minimal");
+      AppSerial.println("NVLOG|STATUS|mode=serial_minimal");
     }
   }
 }
