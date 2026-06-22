@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.9 - 2026-06-22
 
 - Documented the verified ESP32-S3 hardware validation session with `SESSION_PASS`, `hw100` at 100/100 cycles, `ring_failpoint_smoke` passing, and host-side pytest coverage passing.
 
