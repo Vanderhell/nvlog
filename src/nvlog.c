@@ -12,6 +12,10 @@
 #include <stdlib.h>
 #include "nvlog_wire.h"
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((weak)) void nvlog_test_failpoint(const char *name);
+#endif
+
 #define NVLOG_SUPERBLOCK_PAYLOAD_SIZE 60u
 #define NVLOG_RING_RESERVE_BYTES (NVLOG_RECORD_OVERHEAD + NVLOG_MAX_PAYLOAD)
 
@@ -114,6 +118,19 @@ static nvlog_status_t verify_result_status(nvlog_verify_result_t result)
     }
     return NVLOG_ERR_CORRUPT;
 }
+
+#if defined(__GNUC__) || defined(__clang__)
+static void nvlog_fire_failpoint(const char *name)
+{
+    if (name != NULL && nvlog_test_failpoint)
+        nvlog_test_failpoint(name);
+}
+#else
+static void nvlog_fire_failpoint(const char *name)
+{
+    (void)name;
+}
+#endif
 
 static int is_all_value(const uint8_t *buf, uint32_t len, uint8_t value)
 {
@@ -483,6 +500,7 @@ static int ring_publish_superblocks(nvlog_ctx_t *ctx)
         .crc32 = 0,
     };
     if (sb_write(ctx, 0, &sb) != 0) return -1;
+    nvlog_fire_failpoint("superblock_publish");
     if (sb_write(ctx, NVLOG_SUPERBLOCK_SIZE, &sb) != 0) return -1;
     return 0;
 }
@@ -726,6 +744,8 @@ static int write_record_wire(nvlog_ctx_t *ctx,
             uint32_t chunk_len = ctx->program_unit;
             if (chunk_len > record_alloc - offset)
                 chunk_len = record_alloc - offset;
+            if (offset <= commit_rel && offset + chunk_len > commit_rel)
+                nvlog_fire_failpoint("data_commit");
             for (uint32_t i = 0; i < chunk_len; i++) {
                 image[i] = record_byte_at(raw,
                                           payload_len,
@@ -766,6 +786,7 @@ static int write_record_wire(nvlog_ctx_t *ctx,
         }
         if (hal_write(ctx, crc_off, crc_raw, sizeof(crc_raw)) != 0)
             return NVLOG_ERR_IO;
+        nvlog_fire_failpoint("data_commit");
         commit = 0x00u;
         if (hal_write(ctx, commit_off, &commit, sizeof(commit)) != 0)
             return NVLOG_ERR_IO;
@@ -1059,6 +1080,7 @@ nvlog_status_t nvlog_append(nvlog_ctx_t *ctx,
                                            &pad_total);
                 if (rc != NVLOG_OK) return (nvlog_status_t)rc;
                 ctx->padding_bytes += pad_total;
+                nvlog_fire_failpoint("wrap");
                 ctx->write_ptr = (uint32_t)NVLOG_REGION_HEADER_SIZE;
             }
             base = (uint32_t)NVLOG_REGION_HEADER_SIZE;

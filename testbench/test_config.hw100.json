@@ -1,0 +1,75 @@
+{
+  "session": {
+    "duration_seconds": 1800,
+    "output_directory": "sessions-hw100",
+    "startup_settle_seconds": 1.5,
+    "power_worker_stop_timeout_seconds": 15,
+    "abort_on_power_worker_failure": true
+  },
+  "serial": {
+    "port": "COM19",
+    "strict_configured_port": false,
+    "baudrate": 115200,
+    "read_timeout_seconds": 0.25,
+    "write_timeout_seconds": 2,
+    "reconnect_interval_seconds": 1,
+    "silent_warning_seconds": 10,
+    "match": {
+      "vid": null,
+      "pid": null,
+      "serial_number": "",
+      "description_contains": "USB"
+    },
+    "startup_commands": [
+      "PING",
+      "STATUS",
+      "NVLOG_STATUS",
+      "DISPLAY_TEST",
+      "SD_TEST",
+      "PSRAM_TEST",
+      "PROJECT_TEST"
+    ]
+  },
+  "power_faults": {
+    "enabled": true,
+    "backend": "command",
+    "mode": "fixed",
+    "startup_delay_seconds": 5,
+    "fixed_interval_seconds": 2,
+    "random_min_seconds": 30,
+    "random_max_seconds": 180,
+    "off_duration_seconds": 0.5,
+    "random_seed": null,
+    "command_timeout_seconds": 20,
+    "recovery_attempts": 10,
+    "recovery_retry_seconds": 1,
+    "max_cycles": 100,
+    "ensure_power_on_at_start": true,
+    "ensure_power_on_on_exit": true,
+    "windows_pnp": {
+      "instance_id": "USB\\VID_0000&PID_0000\\REPLACE_ME"
+    },
+    "command": {
+      "off": [
+        "C:\\Users\\vande\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+        "testbench\\host\\trigger_serial_command_async.py",
+        "--match-description",
+        "USB",
+        "--command",
+        "REBOOT",
+        "--delay-before-send",
+        "2.0",
+        "--linger",
+        "0.2",
+        "--open-timeout",
+        "5"
+      ],
+      "on": [
+        "C:\\WINDOWS\\System32\\cmd.exe",
+        "/c",
+        "exit",
+        "0"
+      ]
+    }
+  }
+}

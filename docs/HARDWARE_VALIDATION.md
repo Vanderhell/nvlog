@@ -1,26 +1,14 @@
 # Hardware Validation
 
-This repo currently ships compile-verified hardware example skeletons.
+Public validation summary for the NVLog hardware bench.
 
-## Validation steps for a new board
+Validated on `2026-06-21` with the ESP32-S3 HW bench:
 
-- verify backend read/write alignment
-- verify erase behavior
-- verify 0 -> 1 protection if relevant
-- verify mount after interrupted append
-- verify ring overwrite behavior if supported
-- verify program unit size
-- verify timeout recovery
+- `arduino-cli compile` for `testbench/firmware/HWTestBench` passed with the ESP32-S3 PSRAM board profile.
+- Host-side bench runner and power-fault worker unit tests passed.
+- The bench firmware reports live progress on the display.
+- SDMMC logging through `SD_MMC` is wired and exercised by the bench.
+- PSRAM capability detection is present on the ESP32-S3 N16R8 board.
+- The hardware suite includes a 100-cycle power-cut stress configuration.
 
-## STM32
-
-Check the family-specific flash geometry:
-
-- F4: sector erase, 32-bit program model
-- L4: 8-byte program model
-- H7: 32-byte flash-word model
-
-## ESP32 / ESP-IDF
-
-Validate the partition backend against the SDK storage API and its sync behavior.
-
+This document records the stable validation outcome only.
